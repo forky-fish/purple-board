@@ -1,0 +1,7 @@
+{
+  "name": "session-dock",
+  "version": "0.1.0",
+  "description": "Sidebar for Claude Code sessions: a rendered Markdown card with goal, current block, next steps and open gates, shown in a tmux side pane.",
+  "author": { "name": "forky-fish" },
+  "license": "MIT"
+}

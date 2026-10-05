@@ -271,7 +271,7 @@ export function register(on, userOptions) {
         ? [Text({ dimColor: true, children: [view.cardPath] }), Markdown({ key: 'card', text: clip(view.card) })]
         : [Text({ children: ['No card at ' + (options.cardFile || '.claude/dock.md') + '.'] })]
     } else {
-      body = [Code({ children: [clip((view.git.status || 'working tree clean') + '\n\n' + (view.git.log || ''))] })]
+      body = [Code({ source: clip((view.git.status || 'working tree clean') + '\n\n' + (view.git.log || '')) })]
     }
 
     return Box({

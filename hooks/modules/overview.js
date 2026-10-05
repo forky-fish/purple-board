@@ -16,6 +16,7 @@ function fresh() {
 export default {
   id: 'overview',
   title: 'Overview',
+  short: 'Over',
 
   event(ctx, ev) {
     const d = ctx.data('overview', () => ({ away: fresh(), history: [] }))

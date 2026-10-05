@@ -11,6 +11,7 @@ import gitTab from './modules/git.js'
 import sessions from './modules/sessions.js'
 import plan from './modules/plan.js'
 import agents from './modules/agents.js'
+import ports from './modules/ports.js'
 import notes from './modules/notes.js'
 import artifacts from './modules/artifacts.js'
 import { fileModule } from './modules/file.js'
@@ -27,10 +28,12 @@ const BUILTIN = {
   agents,
   notes,
   artifacts,
+  ports,
   card: fileModule({ id: 'card', title: 'Card', file: '.claude/dock.md' }),
   git: gitTab,
 }
-const DEFAULT_TABS = ['overview', 'sessions', 'notes', 'artifacts', 'card', 'git']
+const DEFAULT_TABS = ['overview', 'plan', 'sessions', 'agents', 'notes', 'artifacts', 'ports', 'card', 'git']
+const TAB_BAR_COLUMNS = 56 // above this the inactive tabs use their short titles
 
 let options = {}
 
@@ -294,9 +297,10 @@ export function register(on, userOptions) {
     Object.assign(ctx, io($))
     const el = $.ui.resolve(e)
     const { Box, Text, Button } = el
+    const crowded = ctx.tabs.reduce((n, m) => n + m.title.length + 2, 0) > TAB_BAR_COLUMNS
     const tabs = ctx.tabs.map((m, i) =>
       Button({
-        key: 'tab-' + m.id, label: m.title, hotkey: i < 9 ? String(i + 1) : undefined, plain: true, dimColor: ctx.tab !== m.id,
+        key: 'tab-' + m.id, label: crowded && ctx.tab !== m.id && m.short ? m.short : m.title, hotkey: i < 9 ? String(i + 1) : undefined, plain: true, dimColor: ctx.tab !== m.id,
         onPress: () => { ctx.tab = m.id; refresh($) },
       }))
     const active = ctx.tabs.find((m) => m.id === ctx.tab) || ctx.tabs[0]

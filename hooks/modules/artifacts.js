@@ -16,6 +16,7 @@ function extractUrl(result, e) {
 export default {
   id: 'artifacts',
   title: 'Artifacts',
+  short: 'Art',
 
   async event(ctx, ev) {
     if (ev.type !== 'tool' || ev.e.tool !== 'Artifact') return

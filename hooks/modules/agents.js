@@ -5,6 +5,7 @@ const MAX_ROWS = 40
 export default {
   id: 'agents',
   title: 'Agents',
+  short: 'Agent',
 
   async load(ctx) {
     const d = ctx.live('agents')

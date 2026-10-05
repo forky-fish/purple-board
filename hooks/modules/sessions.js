@@ -15,6 +15,7 @@ async function readJson(ctx, path) {
 export default {
   id: 'sessions',
   title: 'Sessions',
+  short: 'Sess',
 
   async load(ctx) {
     const d = ctx.live('sessions')

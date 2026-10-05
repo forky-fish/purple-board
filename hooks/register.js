@@ -139,6 +139,8 @@ function io($) {
     reset: () => reset($),
     invalidate: () => $.ui.invalidate('ui.render'),
     refresh: () => refresh($),
+    // Ask for a pane size (columns when docked, rows when inline); {} goes back to the default.
+    resize: (size) => $.ui.open({ id: PANE, title: 'Dock', focus: true, closeOnEscape: true, ...size }),
   }
 }
 
@@ -304,7 +306,11 @@ export function register(on, userOptions) {
     const tabs = ctx.tabs.map((m, i) =>
       Button({
         key: 'tab-' + m.id, label: crowded && ctx.tab !== m.id && m.short ? m.short : m.title, hotkey: m.id === 'help' ? 'h' : i < 9 ? String(i + 1) : undefined, plain: true, dimColor: ctx.tab !== m.id,
-        onPress: () => { ctx.tab = m.id; refresh($) },
+        onPress: async () => {
+          ctx.tab = m.id
+          await refresh($)
+          if (ctx.sized) { ctx.sized = false; await ctx.resize({}) } // a tab that resized the pane gives the size back
+        },
       }))
     const active = ctx.tabs.find((m) => m.id === ctx.tab) || ctx.tabs[0]
     let body

@@ -227,7 +227,7 @@ export default {
     about: 'Git repositories at and below the session root: pick one, then look at its status, commit graph or branches. The overview keeps showing the session root’s repository.',
     keys: [
       's  status: branch, ahead/behind, changed files, stashes',
-      'g  graph: git log --graph of all branches (60 commits)',
+      'g  graph: git log --graph of all branches (60 commits); the dock widens to fit it',
       'b  branches: age, ahead/behind upstream, merged into the default branch',
       'f  rescan for repositories (otherwise every 3 minutes)',
       'o  open the repository list (n: next page), Tab/Enter or click to choose; kept per session',
@@ -274,7 +274,21 @@ export default {
     }
     const buttons = VIEWS.map((v) => el.Button({
       key: 'view-' + v.id, label: v.label, hotkey: v.hotkey, plain: true, dimColor: d.view !== v.id,
-      onPress: () => { d.view = v.id; ctx.refresh() },
+      onPress: async () => {
+        d.view = v.id
+        await ctx.refresh()
+        // The graph asks for the width (docked) or height (inline) its lines need; other views give it back.
+        if (v.id === 'graph') {
+          const lines = ctx.live('git').data?.graph || []
+          if (lines.length) {
+            ctx.sized = true
+            await ctx.resize({ columns: Math.min(200, Math.max(44, ...lines.map((l) => l.length)) + 4), rows: Math.min(70, lines.length + 8) })
+          }
+        } else if (ctx.sized) {
+          ctx.sized = false
+          await ctx.resize({})
+        }
+      },
     }))
     buttons.push(el.Button({ key: 'rescan', label: 'rescan', hotkey: 'f', plain: true, dimColor: true, onPress: () => { live.rescan = true; ctx.refresh() } }))
     const body = live.shown === d.view && live.data ? RENDERERS[d.view](ctx, el, live.data[d.view]) : [el.Text({ key: 'loading', dimColor: true, children: ['loading…'] })]

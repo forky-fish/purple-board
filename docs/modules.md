@@ -37,6 +37,7 @@ export default {
 | `ctx.state` | the whole saved state (`since`, `head`, `modules`) |
 | `ctx.readFile`, `writeFile`, `exists`, `list`, `run(argv, timeoutMs, cwd)`, `agents()` | I/O (files, a command, by default in the project root; `cwd` optional, the session's agent list) |
 | `ctx.reset()`, `ctx.invalidate()`, `ctx.refresh()` | start a new window, redraw, reload the active tab |
+| `ctx.resize({ columns, rows })` | ask for a pane size (columns when docked, rows when inline; `{}` = default); set `ctx.sized = true` and the core gives the size back on the next tab switch. The person's own resizing wins. |
 
 ## Rules
 

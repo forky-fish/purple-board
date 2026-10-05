@@ -56,3 +56,14 @@ export function heading(el, key, text) {
 export function spacer(el, key) {
   return el.Text({ key, children: [' '] })
 }
+
+// "claude-sonnet-4-5-20250929" -> "sonnet 4.5"
+export function shortModel(name) {
+  const m = String(name || '').match(/(opus|sonnet|haiku|fable)[-\s]?(\d+)?(?:[-.](\d{1,2})(?!\d))?/i)
+  if (!m) return String(name || '').slice(0, 12)
+  return m[1].toLowerCase() + (m[2] ? ' ' + m[2] + (m[3] ? '.' + m[3] : '') : '')
+}
+
+export function basename(path) {
+  return String(path || '').replace(/\/+$/, '').split('/').pop() || ''
+}

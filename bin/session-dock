@@ -297,11 +297,40 @@ function serve(dir) {
       const record = readState(dir);
       return json(200, record ? { ...record, card: readCard(dir) } : {});
     }
+    if (url === '/sessions') return json(200, { rows: sessionRows(), current: (readState(dir) || { view: { session: {} } }).view.session.id });
     if (url === '/reset' && req.method === 'POST') { res.writeHead(resetWindow(dir) ? 204 : 404); return res.end(); }
     if (url !== '/') { res.writeHead(404); return res.end(); }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     res.end(page);
   }).listen(port, '127.0.0.1', () => console.log(`session-dock: http://127.0.0.1:${port} (${dir})`));
+}
+
+// Recently active sessions (24 h), joined with Claude Code's live session files.
+function sessionRows() {
+  const live = new Map();
+  const liveDir = path.join(HOME_DIR, '..', 'sessions');
+  try {
+    for (const n of fs.readdirSync(liveDir).filter((x) => x.endsWith('.json'))) {
+      const info = readJson(path.join(liveDir, n));
+      if (info && info.sessionId) live.set(info.sessionId, info);
+    }
+  } catch { /* no live sessions */ }
+  const order = { busy: 0, waiting: 0, idle: 1, gone: 2 };
+  const rows = [];
+  for (const r of allRecords()) {
+    if (Date.now() - r.updatedAt > 24 * 3600 * 1000) continue;
+    const s = r.view.session;
+    const info = live.get(s.id);
+    const status = info ? (['busy', 'idle', 'waiting'].includes(info.status) ? info.status : 'idle') : 'gone';
+    const m = String(s.model || '').match(/(opus|sonnet|haiku|fable)[-\s]?(\d+)?(?:[-.](\d{1,2})(?!\d))?/i);
+    rows.push({
+      id: s.id, status, name: (info && info.name) || s.name || String(s.id).slice(0, 8),
+      project: path.basename(s.cwd || ''), model: m ? m[1].toLowerCase() + (m[2] ? ' ' + m[2] + (m[3] ? '.' + m[3] : '') : '') : '',
+      context: r.view.usage && r.view.usage.contextPercent, branch: r.view.git && r.view.git.branch,
+      updatedAt: Math.max(r.updatedAt || 0, (info && info.updatedAt) || 0),
+    });
+  }
+  return rows.sort((a, b) => order[a.status] - order[b.status] || b.updatedAt - a.updatedAt);
 }
 
 function readCard(dir) {

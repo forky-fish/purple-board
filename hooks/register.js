@@ -10,6 +10,7 @@ import overview from './modules/overview.js'
 import gitTab from './modules/git.js'
 import sessions from './modules/sessions.js'
 import plan from './modules/plan.js'
+import agents from './modules/agents.js'
 import notes from './modules/notes.js'
 import artifacts from './modules/artifacts.js'
 import { fileModule } from './modules/file.js'
@@ -23,6 +24,7 @@ const BUILTIN = {
   overview,
   plan,
   sessions,
+  agents,
   notes,
   artifacts,
   card: fileModule({ id: 'card', title: 'Card', file: '.claude/dock.md' }),
@@ -126,6 +128,7 @@ function io($) {
     writeFile: (path, text) => $.fs.write(path, text),
     exists: (path) => $.fs.exists(path),
     list: (path) => $.fs.list(path),
+    agents: () => $.agent.list(),
     run: (argv, timeoutMs = 15000) => $.process.run(argv, { cwd: ctx.root, timeoutMs }),
     reset: () => reset($),
     invalidate: () => $.ui.invalidate('ui.render'),

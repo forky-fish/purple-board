@@ -1,5 +1,6 @@
 // Overview: who and where this session is, how full its context and limits are,
 // and the "since you were away" digest with its reset button.
+import { planSummary } from './plan.js'
 import { ALARM, ago, heading, limitLabel, meter, plural, sparkline, spacer } from '../lib/util.js'
 
 const HISTORY_MAX = 40
@@ -56,6 +57,9 @@ export default {
     } else {
       out.push(el.Text({ key: 'branch', dimColor: true, children: ['no git repository'] }))
     }
+
+    const plan = planSummary(ctx)
+    if (plan) out.push(el.Text({ key: 'plan', color: 'cyan', children: ['☰ ' + plan] }))
 
     const hot = [['context', u.contextPercent], ...(u.rateLimits || []).map((r) => [limitLabel(r.kind), r.percentUsed])].filter(([, p]) => p >= ALARM)
     if (hot.length) {

@@ -9,6 +9,7 @@
 import overview from './modules/overview.js'
 import gitTab from './modules/git.js'
 import sessions from './modules/sessions.js'
+import plan from './modules/plan.js'
 import notes from './modules/notes.js'
 import artifacts from './modules/artifacts.js'
 import { fileModule } from './modules/file.js'
@@ -20,6 +21,7 @@ const SAVE_EVERY_MS = 5000
 
 const BUILTIN = {
   overview,
+  plan,
   sessions,
   notes,
   artifacts,

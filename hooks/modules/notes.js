@@ -32,7 +32,7 @@ export default {
   title: 'Notes',
   help: {
     about: 'A note list per project and a global one, kept across sessions and resets. Stored in ~/.claude/session-dock/notes/.',
-    keys: ['/sdock notes  opens the pane focused on the input', 'type, Enter  add a note', 'Tab  walk the buttons and the input', '[project]/[global]  switch where new notes go', '☐/☑  toggle done · ✕  delete'],
+    keys: ['/sdock notes  opens the pane focused on the input', 'type, Enter  add a note', 'Tab  walk the buttons and the input', '[project]/[global]  switch where new notes go', '☐/☑  toggle done · [✕]  delete (red on hover)'],
   },
 
   async load(ctx) {
@@ -88,7 +88,7 @@ export default {
               }),
             }),
             el.Button({
-              key: 'del', label: '✕', plain: true, dimColor: true,
+              key: 'del', label: '[✕]', plain: true, hover: { color: 'red' },
               onPress: () => mutate(scope, (ls) => { if (ls[t.index] && ls[t.index].text === t.text) ls.splice(t.index, 1) }),
             }),
             el.Text({ key: 'text', dimColor: t.done, children: [t.text] }),

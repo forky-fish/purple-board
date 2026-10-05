@@ -23,13 +23,19 @@ Each tab is a module (see [docs/modules.md](docs/modules.md)); default order:
 - **Overview**: session name, model, branch, uncommitted files, context fill, 5 h / 7 d
   limits with colours and an alarm, context trend, cost, and **Since you were away**
   (button *Reset*, or `/sdock reset`): turns, working time, commits, files edited, test
-  runs, subagents. Built from tool events and Git; the model writes none of it.
+  runs, subagents, plus a **Timeline** of the first line of each answer. Built from tool
+  events, answers and Git, kept in the dock's own file; the model writes none of it.
+- **Plan**: the session's task list (TodoWrite / Task tools) with a progress meter; the
+  Overview also shows a one-line summary ("plan 3/7, now: ...").
 - **Sessions**: one row per session active in the last 24 hours (status, name, project,
   model, context, branch, age).
+- **Agents**: running and finished subagents with status and type.
 - **Notes**: a project list and a global list of tasks, kept in Markdown files that
   survive Reset and new sessions.
 - **Artifacts**: the pages this session published, as links (the browser view also shows
   them from their local source files).
+- **Ports**: TCP ports your own processes listen on, with the ones started inside the
+  project marked (needs `ss`; read only while the tab is shown).
 - **Card**: your `.claude/dock.md` rendered. **Git**: status and recent commits.
 
 ## Install

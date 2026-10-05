@@ -9,6 +9,7 @@ file and the refresh timer. Everything shown in a tab is a module in `hooks/modu
 export default {
   id: 'example',            // unique, [\w-]{1,32}
   title: 'Example',         // tab label
+  short: 'Ex',              // optional shorter label for inactive tabs when the bar is crowded
   event(ctx, ev) {},        // optional, may be async
   async load(ctx) {},       // optional
   render(ctx, el) { return [ /* elements */ ] },
@@ -34,7 +35,7 @@ export default {
 | `ctx.live(id)` | volatile object, refilled by `load()` |
 | `ctx.view` | shared live facts: `session`, `usage`, `git`, `commits` |
 | `ctx.state` | the whole saved state (`since`, `head`, `modules`) |
-| `ctx.readFile`, `writeFile`, `exists`, `list`, `run(argv, timeoutMs)` | I/O (below) |
+| `ctx.readFile`, `writeFile`, `exists`, `list`, `run(argv, timeoutMs)`, `agents()` | I/O (files, a command in the project root, the session's agent list) |
 | `ctx.reset()`, `ctx.invalidate()`, `ctx.refresh()` | start a new window, redraw, reload the active tab |
 
 ## Rules
@@ -72,19 +73,22 @@ Two optional JSON files choose the tabs and their order:
 ```json
 {
   "tabs": [
-    "overview", "sessions", "notes", "artifacts", "git",
+    "overview", "plan", "sessions", "notes", "artifacts", "git",
     { "id": "todo", "title": "Todo", "file": "TODO.md" },
     { "id": "status", "title": "Status", "command": ["git", "status", "--short"] }
   ]
 }
 ```
 
-- A string is a built-in module: `overview`, `sessions`, `notes`, `artifacts`, `card`, `git`.
+- A string is a built-in module: `overview`, `plan`, `sessions`, `agents`, `notes`, `artifacts`, `ports`, `card`, `git`.
 - `{ id, title, file }` shows a Markdown file (relative to the project root, or absolute).
 - `{ id, title, command }` shows the output of a command given as an argv array (no shell).
   **Command tabs are honoured only in the global config**, so a cloned repository cannot make
   the dock run anything.
-- Without any config the tabs are `overview, sessions, notes, artifacts, card, git`.
+- Without any config the tabs are `overview, plan, sessions, agents, notes, artifacts, ports, card, git`.
+- With many tabs the bar can get wide: when the full titles exceed about 56 columns, inactive
+  tabs show their `short` title (the active one always shows the full title), and the bar wraps
+  if it still does not fit. Hotkeys `1`..`9` select the first nine tabs.
 - The refresh interval is the plugin option `refreshSeconds` (default 15, minimum 5).
 
 ## Files

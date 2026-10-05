@@ -3,7 +3,7 @@
 An overview pane for Claude Code sessions: model, context, usage limits, git
 branch, and a resettable list of what happened while you were away.
 
-Three views, one data model (`<project>/.claude/dock-state.json`, written by the plugin):
+Three views, one data model (`~/.claude/session-dock/sessions/<session id>.json`, written by the plugin):
 
 | View | How | Needs |
 |---|---|---|
@@ -12,17 +12,25 @@ Three views, one data model (`<project>/.claude/dock-state.json`, written by the
 | **Browser** | `session-dock serve` → http://127.0.0.1:7777 | Node |
 
 The plugin changes nothing outside itself: no `settings.json` edits, no hooks or
-status line to install. It reads session figures through the plugin API and writes one
-file into the project's `.claude/` (turn off with the `writeState` option).
+status line to install, nothing written into your projects. It reads session figures
+through the plugin API and keeps its files under `~/.claude/session-dock/`. It never
+adds text to the transcript or the prompt.
 
-## Overview content
+## Tabs
 
-- session name, model, branch (ahead/behind), uncommitted files
-- context fill, 5 h / 7 d rate limits, cost
-- **Since you were away** (button *Reset*, or `/sdock reset`): turns and working time,
-  commits since the reset (from Git), files edited, test runs, subagents. Built from
-  tool events and Git; the model writes none of it.
-- **Card** tab: your `.claude/dock.md` rendered; **Git** tab: status and recent commits.
+Each tab is a module (see [docs/modules.md](docs/modules.md)); default order:
+
+- **Overview**: session name, model, branch, uncommitted files, context fill, 5 h / 7 d
+  limits with colours and an alarm, context trend, cost, and **Since you were away**
+  (button *Reset*, or `/sdock reset`): turns, working time, commits, files edited, test
+  runs, subagents. Built from tool events and Git; the model writes none of it.
+- **Sessions**: one row per session active in the last 24 hours (status, name, project,
+  model, context, branch, age).
+- **Notes**: a project list and a global list of tasks, kept in Markdown files that
+  survive Reset and new sessions.
+- **Artifacts**: the pages this session published, as links (the browser view also shows
+  them from their local source files).
+- **Card**: your `.claude/dock.md` rendered. **Git**: status and recent commits.
 
 ## Install
 
@@ -42,8 +50,8 @@ ln -s ~/.local/share/session-dock/bin/session-dock ~/.local/bin/session-dock
 
 ## Use
 
-`/sdock` opens the pane (`/sdock close`, `/sdock reset`). Keys in the pane: `1` `2` `3`
-tabs, `x` reset, `r` reload.
+`/sdock` opens the pane (`/sdock close`, `/sdock reset`, `/sdock <tab>`). Keys in the pane:
+`1`..`9` tabs, `x` reset, `r` reload.
 
 tmux view, inside the tmux window of the session, in the project directory:
 
@@ -52,7 +60,9 @@ session-dock init      # create .claude/dock.md from the template
 session-dock open      # open the dock pane on the right
 ```
 
-Other commands: `session-dock serve` (browser), `session-dock reset`, `session-dock render [dir]` prints once, `session-dock watch [dir]`
+The views show the newest session started in the directory; `--session <id>` (or
+`SESSION_DOCK_SESSION`) picks another. Other commands: `session-dock serve` (browser, 127.0.0.1
+only), `session-dock reset`, `session-dock render [dir]` prints once, `session-dock watch [dir]`
 is what the pane runs. `SESSION_DOCK_WIDTH` sets the pane width (default 44),
 `SESSION_DOCK_FILE` points to another card.
 
@@ -69,6 +79,9 @@ Supported Markdown: headings, bold, italics, inline code, code blocks, lists,
 numbered lists, task boxes, quotes, rules, links (text only) and tables (shown as
 `key: value` lines in the narrow pane). The words `DONE`, `OK`, `WAIT`, `GATE`,
 `TODO`, `BLOCKED`, `FAIL` and `ERROR` are coloured.
+
+Configure tabs in `~/.claude/session-dock/config.json` or `.claude/dock.json`: see
+[docs/modules.md](docs/modules.md).
 
 Keep cards free of secrets; they are plain files next to the code.
 

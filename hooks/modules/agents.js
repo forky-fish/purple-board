@@ -5,6 +5,10 @@ const MAX_ROWS = 40
 export default {
   id: 'agents',
   title: 'Agents',
+  help: {
+    about: 'Subagents of this session, running ones first.',
+    keys: [],
+  },
   short: 'Agent',
 
   async load(ctx) {

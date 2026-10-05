@@ -6,6 +6,7 @@ export function commandModule({ id, title, command }) {
   return {
     id,
     title,
+    help: { about: 'Output of `' + command.join(' ') + '`, run in the project root while this tab is shown.', keys: [] },
     async load(ctx) {
       const d = ctx.live(id)
       try {

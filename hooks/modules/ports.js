@@ -23,6 +23,10 @@ export function parseSs(text) {
 export default {
   id: 'ports',
   title: 'Ports',
+  help: {
+    about: 'TCP ports your own processes listen on; ● marks servers started inside this project.',
+    keys: [],
+  },
 
   async load(ctx) {
     const d = ctx.live('ports')

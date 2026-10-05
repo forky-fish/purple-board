@@ -16,6 +16,10 @@ function fresh() {
 export default {
   id: 'overview',
   title: 'Overview',
+  help: {
+    about: "Who and where this session is: status, model, branch, context and rate-limit meters, the context trend, the plan line, and 'Since you were away': turns, commits, edited files, tests, subagents and the first line of recent answers.",
+    keys: ["x  reset the 'Since you were away' window (also /sdock reset)"],
+  },
   short: 'Over',
 
   event(ctx, ev) {

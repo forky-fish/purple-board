@@ -30,6 +30,10 @@ export function format(lines) {
 export default {
   id: 'notes',
   title: 'Notes',
+  help: {
+    about: 'A note list per project and a global one, kept across sessions and resets. Stored in ~/.claude/session-dock/notes/.',
+    keys: ['/sdock notes  opens the pane focused on the input', 'type, Enter  add a note', 'Tab  walk the buttons and the input', '[project]/[global]  switch where new notes go', '☐/☑  toggle done · ✕  delete'],
+  },
 
   async load(ctx) {
     const d = ctx.live('notes')
@@ -56,7 +60,7 @@ export default {
       children: [
         el.Button({ key: 'scope', label: d.scope === 'project' ? '[project]' : '[global]', plain: true, onPress: () => { d.scope = d.scope === 'project' ? 'global' : 'project'; ctx.invalidate() } }),
         el.Input({
-          key: 'input-' + d.draft, placeholder: 'new note, Enter to add to ' + d.scope, submitLabel: 'add',
+          key: 'input-' + d.draft, autoFocus: true, placeholder: 'new note, Enter to add to ' + d.scope, submitLabel: 'add',
           onSubmit: (value) => {
             const text = String(value).replace(/\s+/g, ' ').trim()
             if (!text) return

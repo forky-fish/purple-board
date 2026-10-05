@@ -4,6 +4,10 @@ import { clip } from '../lib/util.js'
 export default {
   id: 'git',
   title: 'Git',
+  help: {
+    about: "Status and recent commits of the session's repository.",
+    keys: [],
+  },
   render(ctx, el) {
     const g = ctx.view.git
     if (g.branch === undefined || g.branch === null) return [el.Text({ key: 'none', dimColor: true, children: ['Not a git repository.'] })]

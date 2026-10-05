@@ -22,6 +22,10 @@ function cleanTodos(list) {
 export default {
   id: 'plan',
   title: 'Plan',
+  help: {
+    about: "The session's task list (TodoWrite and the task tools) with progress.",
+    keys: ['☑ done · ▶ in progress · ☐ open'],
+  },
 
   event(ctx, ev) {
     if (ev.type !== 'tool') return

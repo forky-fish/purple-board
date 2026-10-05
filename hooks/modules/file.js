@@ -6,6 +6,7 @@ export function fileModule({ id, title, file }) {
   return {
     id,
     title,
+    help: { about: 'Renders ' + file + ' from the project as Markdown' + (id === 'card' ? ' (the session card the dock-card skill keeps current).' : '.'), keys: [] },
     async load(ctx) {
       const d = ctx.live(id)
       try { d.text = await ctx.readFile(path(ctx)) } catch { d.text = '' }

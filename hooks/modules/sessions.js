@@ -15,6 +15,10 @@ async function readJson(ctx, path) {
 export default {
   id: 'sessions',
   title: 'Sessions',
+  help: {
+    about: 'Every Claude Code session active in the last 24 hours on this machine: status dot (yellow busy, green idle, red waiting, dim ended), name, project, model, context, branch.',
+    keys: ['▸ marks this session'],
+  },
   short: 'Sess',
 
   async load(ctx) {

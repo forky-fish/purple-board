@@ -35,7 +35,7 @@ export default {
 | `ctx.live(id)` | volatile object, refilled by `load()` |
 | `ctx.view` | shared live facts: `session`, `usage`, `git`, `commits` |
 | `ctx.state` | the whole saved state (`since`, `head`, `modules`) |
-| `ctx.readFile`, `writeFile`, `exists`, `list`, `run(argv, timeoutMs)`, `agents()` | I/O (files, a command in the project root, the session's agent list) |
+| `ctx.readFile`, `writeFile`, `exists`, `list`, `run(argv, timeoutMs, cwd)`, `agents()` | I/O (files, a command, by default in the project root; `cwd` optional, the session's agent list) |
 | `ctx.reset()`, `ctx.invalidate()`, `ctx.refresh()` | start a new window, redraw, reload the active tab |
 
 ## Rules

@@ -135,7 +135,7 @@ function io($) {
     list: (path) => $.fs.list(path),
     agents: () => $.agent.list(),
     messages: () => $.session.messages(),
-    run: (argv, timeoutMs = 15000) => $.process.run(argv, { cwd: ctx.root, timeoutMs }),
+    run: (argv, timeoutMs = 15000, cwd = ctx.root) => $.process.run(argv, { cwd, timeoutMs }),
     reset: () => reset($),
     invalidate: () => $.ui.invalidate('ui.render'),
     refresh: () => refresh($),

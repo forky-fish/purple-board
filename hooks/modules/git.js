@@ -3,6 +3,7 @@
 import { ago, basename, plural, spacer } from '../lib/util.js'
 
 const MAX_REPOS = 150
+const PICK_PAGE = 15
 const DISCOVER_TTL_MS = 3 * 60 * 1000
 const GRAPH_ROWS = 60
 const MAX_FILES = 40
@@ -30,10 +31,17 @@ function relative(root, path) {
   return basename(path) + ' (outside root)'
 }
 
-// Branch of a repository without spawning git: .git/HEAD of a normal repository.
+// Branch of a repository without spawning git: .git/HEAD, or for a worktree the HEAD in the
+// directory its .git file points to.
 async function readBranch(ctx, repo) {
   try {
-    const head = (await ctx.readFile(repo.path + '/.git/HEAD')).trim()
+    let gitDir = repo.path + '/.git'
+    if (repo.worktree) {
+      const m = (await ctx.readFile(gitDir)).match(/^gitdir: (.+)$/m)
+      if (!m) return null
+      gitDir = m[1].startsWith('/') ? m[1].trim() : repo.path + '/' + m[1].trim()
+    }
+    const head = (await ctx.readFile(gitDir + '/HEAD')).trim()
     const m = head.match(/^ref: refs\/heads\/(.+)$/)
     return m ? m[1] : 'detached ' + head.slice(0, 7)
   } catch {
@@ -41,30 +49,27 @@ async function readBranch(ctx, repo) {
   }
 }
 
+// One find, no git per repository: discovery stays fast with a hundred repositories.
 async function discover(ctx) {
-  const found = new Map() // path -> { path, worktree }
+  const found = new Map() // path -> { path, worktree, mtime }
   const top = await git(ctx, ctx.root, ['rev-parse', '--show-toplevel'])
-  if (top) found.set(top, { path: top, worktree: false })
+  if (top) found.set(top, { path: top, worktree: false, mtime: Infinity })
   try {
-    const r = await ctx.run(['find', ctx.root, '-maxdepth', '3', '-name', 'node_modules', '-prune', '-o', '-name', '.git', '-printf', '%y %p\n'], 10000)
+    const r = await ctx.run(['find', ctx.root, '-maxdepth', '3', '-name', 'node_modules', '-prune', '-o', '-name', '.git', '-printf', '%y %T@ %p\n'], 10000)
     for (const line of r.stdout.split('\n')) {
-      const m = line.match(/^([df]) (.+)\/\.git$/)
-      if (m && !found.has(m[2])) found.set(m[2], { path: m[2], worktree: m[1] === 'f' })
+      const m = line.match(/^([df]) ([\d.]+) (.+)\/\.git$/)
+      if (m && !found.has(m[3])) found.set(m[3], { path: m[3], worktree: m[1] === 'f', mtime: Number(m[2]) })
     }
   } catch { /* keep what we have */ }
   let repos = [...found.values()].sort((a, b) => (a.path === top ? -1 : b.path === top ? 1 : a.path.localeCompare(b.path))).slice(0, MAX_REPOS)
-  await Promise.all(repos.map(async (repo) => {
-    repo.branch = (!repo.worktree && (await readBranch(ctx, repo))) || (await git(ctx, repo.path, ['rev-parse', '--abbrev-ref', 'HEAD'])) || null
+  for (const repo of repos) {
+    repo.branch = await readBranch(ctx, repo)
     repo.rel = relative(ctx.root, repo.path)
-  }))
-  repos = repos.filter((repo) => repo.branch) // drops stray .git directories that are no repository
-  // Default: the repository containing the root, else the most recently committed one.
-  let fallback = top
-  if (!fallback && repos.length) {
-    const times = await Promise.all(repos.map(async (repo) => Number(await git(ctx, repo.path, ['log', '-1', '--format=%ct'])) || 0))
-    fallback = repos[times.indexOf(Math.max(...times))].path
   }
-  return { repos, fallback }
+  repos = repos.filter((repo) => repo.branch) // drops stray .git entries that are no repository
+  // Default: the repository containing the root, else the most recently touched one.
+  const newest = repos.reduce((best, r) => (!best || r.mtime > best.mtime ? r : best), null)
+  return { repos, fallback: top || newest?.path || '' }
 }
 
 function branchLabel(repo) {
@@ -225,7 +230,7 @@ export default {
       'g  graph: git log --graph of all branches (60 commits)',
       'b  branches: age, ahead/behind upstream, merged into the default branch',
       'f  rescan for repositories (otherwise every 3 minutes)',
-      'Tab to the repository picker, arrows and Enter to choose; the choice is kept per session.',
+      'o  open the repository list (n: next page), Tab/Enter or click to choose; kept per session',
     ],
   },
 
@@ -246,13 +251,27 @@ export default {
     const d = ctx.data('git', () => ({ repo: '', view: 'status' }))
     const live = ctx.live('git')
     const repos = live.repos || []
-    const picker = repos.length
-      ? [el.Select({
-        key: 'repo', label: 'Repo: ', value: selected(ctx, d, live),
-        options: repos.map((r) => ({ value: r.path, label: branchLabel(r) })),
-        onSelect: (value) => { d.repo = value; ctx.refresh() },
-      })]
-      : []
+    // Own picker instead of Select (suspected of crashing the pane): a toggle and a page of buttons.
+    const current = repos.find((r) => r.path === selected(ctx, d, live))
+    const picker = []
+    if (repos.length) {
+      picker.push(el.Button({
+        key: 'pick', label: '⎇ ' + (current ? branchLabel(current) : 'choose repository') + (live.picking ? ' ▴' : ' ▾'), hotkey: 'o', plain: true,
+        onPress: () => { live.picking = !live.picking; live.page = 0; ctx.invalidate() },
+      }))
+      if (live.picking) {
+        const page = live.page || 0
+        const shown = repos.slice(page * PICK_PAGE, (page + 1) * PICK_PAGE)
+        shown.forEach((r) => picker.push(el.Button({
+          key: 'repo-' + r.path, label: (r.path === current?.path ? '▸ ' : '  ') + branchLabel(r), plain: true, dimColor: r.path !== current?.path,
+          onPress: () => { d.repo = r.path; live.picking = false; ctx.refresh() },
+        })))
+        if (repos.length > PICK_PAGE) picker.push(el.Button({
+          key: 'repo-next', label: '  more… (' + (page + 1) + '/' + Math.ceil(repos.length / PICK_PAGE) + ')', hotkey: 'n', plain: true, dimColor: true,
+          onPress: () => { live.page = (page + 1) % Math.ceil(repos.length / PICK_PAGE); ctx.invalidate() },
+        }))
+      }
+    }
     const buttons = VIEWS.map((v) => el.Button({
       key: 'view-' + v.id, label: v.label, hotkey: v.hotkey, plain: true, dimColor: d.view !== v.id,
       onPress: () => { d.view = v.id; ctx.refresh() },

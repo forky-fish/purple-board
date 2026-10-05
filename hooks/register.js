@@ -10,6 +10,7 @@ import overview from './modules/overview.js'
 import gitTab from './modules/git.js'
 import sessions from './modules/sessions.js'
 import notes from './modules/notes.js'
+import artifacts from './modules/artifacts.js'
 import { fileModule } from './modules/file.js'
 import { commandModule } from './modules/command.js'
 
@@ -21,10 +22,11 @@ const BUILTIN = {
   overview,
   sessions,
   notes,
+  artifacts,
   card: fileModule({ id: 'card', title: 'Card', file: '.claude/dock.md' }),
   git: gitTab,
 }
-const DEFAULT_TABS = ['overview', 'sessions', 'notes', 'card', 'git']
+const DEFAULT_TABS = ['overview', 'sessions', 'notes', 'artifacts', 'card', 'git']
 
 let options = {}
 
@@ -193,16 +195,17 @@ async function save($, force) {
   } catch { /* the dock never breaks a session */ }
 }
 
-function dispatch(ev) {
+// Modules may handle events asynchronously; one that fails never affects the others or the session.
+async function dispatch(ev) {
   for (const module of ctx.tabs) {
-    try { module.event?.(ctx, ev) } catch { /* a module never breaks a session */ }
+    try { await module.event?.(ctx, ev) } catch { /* a module never breaks a session */ }
   }
 }
 
 async function reset($) {
   ctx.state.since = Date.now()
   ctx.state.head = (await git($, ctx.root, ['rev-parse', '--short', 'HEAD'])) || ''
-  dispatch({ type: 'reset' })
+  await dispatch({ type: 'reset' })
   await refresh($)
 }
 
@@ -244,7 +247,7 @@ export function register(on, userOptions) {
     try {
       if (!e.agentId) {
         await ensure($)
-        dispatch({ type: 'tool', e, result })
+        await dispatch({ type: 'tool', e, result })
         await save($, false)
       }
     } catch { /* ignore */ }
@@ -257,7 +260,7 @@ export function register(on, userOptions) {
         await ensure($)
         ctx.busy = false
         await loadView($) // commits and usage are fresh at the end of each turn
-        dispatch({ type: 'turn', e })
+        await dispatch({ type: 'turn', e })
         await save($, true)
         if (await isOpen($)) ctx.invalidate()
       }

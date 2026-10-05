@@ -300,6 +300,17 @@ function serve(dir) {
     if (url === '/sessions') return json(200, { rows: sessionRows(), current: (readState(dir) || { view: { session: {} } }).view.session.id });
     if (url === '/notes' && req.method === 'GET') return json(200, notesPayload(dir));
     if (url === '/notes' && req.method === 'POST') return readBody(req, (body) => { changeNotes(dir, body); json(200, notesPayload(dir)); });
+    if (url === '/artifacts') return json(200, { items: artifactItems(readState(dir)).map((i) => ({ ...i, html: /\.html?$/i.test(i.file_path || '') && fs.existsSync(i.file_path || '') })) });
+    if (url === '/artifact-file') {
+      const file = new URLSearchParams(req.url.split('?')[1] || '').get('path');
+      if (!allowedArtifactFile(file)) { res.writeHead(404); return res.end(); }
+      try {
+        const body = fs.readFileSync(file);
+        // sandbox without allow-same-origin: scripts run, but the page cannot reach the dock's origin
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': 'sandbox allow-scripts', 'cache-control': 'no-store' });
+        return res.end(body);
+      } catch { res.writeHead(404); return res.end(); }
+    }
     if (url === '/reset' && req.method === 'POST') { res.writeHead(resetWindow(dir) ? 204 : 404); return res.end(); }
     if (url !== '/') { res.writeHead(404); return res.end(); }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
@@ -348,6 +359,18 @@ function readBody(req, cb) {
   let data = '';
   req.on('data', (c) => { data += c; if (data.length > 20000) req.destroy(); });
   req.on('end', () => { try { cb(JSON.parse(data || '{}')); } catch { cb({}); } });
+}
+
+// Artifacts recorded by the plugin (state.modules.artifacts.items). Local source files are only
+// served when some session recorded them.
+function artifactItems(record) {
+  const a = record && record.state && record.state.modules && record.state.modules.artifacts;
+  return a && Array.isArray(a.items) ? a.items : [];
+}
+
+function allowedArtifactFile(file) {
+  if (!file || !path.isAbsolute(file) || !/\.html?$/i.test(file)) return false;
+  return allRecords().some((r) => artifactItems(r).some((i) => i.file_path === file));
 }
 
 // Recently active sessions (24 h), joined with Claude Code's live session files.

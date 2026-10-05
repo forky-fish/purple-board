@@ -303,7 +303,7 @@ export function register(on, userOptions) {
     const crowded = ctx.tabs.reduce((n, m) => n + m.title.length + 2, 0) > TAB_BAR_COLUMNS
     const tabs = ctx.tabs.map((m, i) =>
       Button({
-        key: 'tab-' + m.id, label: crowded && ctx.tab !== m.id && m.short ? m.short : m.title, hotkey: m.id === 'help' ? '?' : i < 9 ? String(i + 1) : undefined, plain: true, dimColor: ctx.tab !== m.id,
+        key: 'tab-' + m.id, label: crowded && ctx.tab !== m.id && m.short ? m.short : m.title, hotkey: m.id === 'help' ? 'h' : i < 9 ? String(i + 1) : undefined, plain: true, dimColor: ctx.tab !== m.id,
         onPress: () => { ctx.tab = m.id; refresh($) },
       }))
     const active = ctx.tabs.find((m) => m.id === ctx.tab) || ctx.tabs[0]

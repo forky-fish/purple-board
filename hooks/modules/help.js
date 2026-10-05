@@ -5,7 +5,7 @@ const GENERAL = [
   '/sdock            open the dock (/sdock <tab> opens a tab, e.g. /sdock notes)',
   '/sdock reset      start a new "Since you were away" window',
   '/sdock close      close the dock (or Esc while it has the keyboard)',
-  '1–9  switch tabs · ?  help · r  reload · Tab  walk buttons and inputs',
+  '1–9  switch tabs · h  help · r  reload · Tab  walk buttons and inputs',
   'Keys work while the dock has the keyboard: /sdock gives it, click it, or use your focus key.',
   'Placement: beside the transcript in fullscreen from 110 columns, else above the prompt.',
   'The dock never writes into the conversation and costs no tokens.',

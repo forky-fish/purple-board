@@ -1,0 +1,4 @@
+{
+  "description": "session-dock: overview pane (usage, git, what happened while you were away)",
+  "modules": ["./register.js"]
+}

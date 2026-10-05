@@ -1,12 +1,12 @@
 {
   "name": "purple-board",
   "owner": { "name": "forky-fish" },
-  "description": "Session dock: a rendered Markdown sidebar for Claude Code sessions.",
+  "description": "Session dock: overview pane for Claude Code sessions.",
   "plugins": [
     {
       "name": "session-dock",
       "source": "./",
-      "description": "Sidebar for Claude Code sessions: rendered Markdown session card in a tmux side pane."
+      "description": "Overview pane for Claude Code sessions: usage, git, and a resettable digest of what happened while you were away."
     }
   ]
 }

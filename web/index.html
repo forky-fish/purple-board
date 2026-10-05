@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Session Dock</title>
+<style>
+:root{--bg:#fff;--fg:#1c1b22;--mut:#6b6978;--line:#e4e2ec;--acc:#7c4dff;--ok:#2e9e5b;--warn:#c98a00;--bad:#d03a3a;--card:#f7f6fb}
+@media (prefers-color-scheme:dark){:root{--bg:#15141a;--fg:#ecebf3;--mut:#9a98aa;--line:#2b2a35;--acc:#a98bff;--ok:#4cc882;--warn:#e3b341;--bad:#ef6b6b;--card:#1d1c25}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}
+main{max-width:560px;margin:0 auto;padding:16px}
+h1{font-size:18px;margin:0}h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:24px 0 8px}
+.sub{color:var(--mut);font-size:13px}code{font:13px ui-monospace,monospace;background:var(--card);padding:1px 5px;border-radius:4px}
+.meter{display:grid;grid-template-columns:70px 1fr 44px;gap:8px;align-items:center;margin:6px 0;font-size:13px}
+.track{height:8px;background:var(--card);border-radius:4px;overflow:hidden}.fill{height:100%;background:var(--ok)}
+.row{display:flex;justify-content:space-between;align-items:center}
+button{font:inherit;font-size:13px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;padding:4px 10px;cursor:pointer}
+button:hover{border-color:var(--acc)}ul{padding-left:20px;margin:6px 0}li{margin:2px 0}
+.card h1,.card h2,.card h3{font-size:14px;text-transform:none;letter-spacing:0;color:var(--fg);margin:12px 0 4px}
+</style></head><body><main id="app"><p class="sub">loading…</p></main>
+<script>
+const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const inl=s=>esc(s).replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');
+function meter(label,p){p=Math.round(p??0);const c=p>=85?'var(--bad)':p>=65?'var(--warn)':'var(--ok)';
+ return `<div class="meter"><span>${esc(label)}</span><div class="track"><div class="fill" style="width:${p}%;background:${c}"></div></div><span>${p}%</span></div>`}
+function md(t){let h='',list=false;for(const l of t.split('\n')){let m;
+ if((m=l.match(/^(#{1,3})\s+(.*)/))){if(list){h+='</ul>';list=false}h+=`<h${m[1].length}>${inl(m[2])}</h${m[1].length}>`}
+ else if((m=l.match(/^\s*[-*]\s+(\[[ xX]\]\s+)?(.*)/))){if(!list){h+='<ul>';list=true}h+=`<li>${m[1]?(/x/i.test(m[1])?'☑ ':'☐ '):''}${inl(m[2])}</li>`}
+ else if(l.trim()){if(list){h+='</ul>';list=false}h+=`<p>${inl(l)}</p>`}}
+ return h+(list?'</ul>':'')}
+function ago(ms){const m=Math.round(ms/6e4);return m<1?'just now':m<60?m+' min ago':Math.round(m/6)/10+' h ago'}
+async function draw(){let s;try{s=await (await fetch('/state')).json()}catch{return}
+ if(!s.session){document.getElementById('app').innerHTML='<p class="sub">no dock-state.json yet: open /sdock in a session</p>';return}
+ const {session:se,usage:u={},git:g={},digest:d={}}=s,files=d.files||[];
+ const b=[`${d.turns||0} turns, ${Math.round((d.workMs||0)/6e4)} min of work`];
+ if((s.commits||[]).length){b.push(`${s.commits.length} commits<ul>${s.commits.slice(0,5).map(c=>`<li><code>${esc(c.slice(0,80))}</code></li>`).join('')}</ul>`)}
+ if(files.length)b.push(`${files.length} files edited: ${files.slice(-6).map(f=>`<code>${esc(f)}</code>`).join(' ')}`);
+ if(d.tests)b.push(`tests run ${d.tests}×`);if(d.agents)b.push(`${d.agents} subagents`);
+ document.getElementById('app').innerHTML=`
+ <h1>${esc(se.name||'session')}</h1><div class="sub"><code>${esc(se.model||'?')}</code> · ${esc(g.branch||'no branch')}${g.dirty?' · '+g.dirty+' uncommitted':' · clean'}</div>
+ <h2>Usage</h2>${meter('context',u.contextPercent)}${(u.rateLimits||[]).map(r=>meter(({five_hour:'5 h',seven_day:'7 d'})[r.kind]||r.kind,r.percentUsed)).join('')}${u.costUsd!==undefined?`<div class="sub">cost $${u.costUsd.toFixed(2)}</div>`:''}
+ <div class="row"><h2>Since you were away <span class="sub">(${d.since?ago(Date.now()-d.since):'session start'})</span></h2><button id="reset">⟲ Reset</button></div>
+ <ul>${b.map(x=>`<li>${x}</li>`).join('')}</ul>
+ ${s.card?`<h2>Card</h2><div class="card">${md(s.card)}</div>`:''}
+ <p class="sub">updated ${ago(Date.now()-s.updatedAt)}</p>`;
+ document.getElementById('reset').onclick=async()=>{await fetch('/reset',{method:'POST'});setTimeout(draw,1500)}}
+draw();setInterval(draw,3000);
+</script></body></html>

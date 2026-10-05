@@ -1,5 +1,5 @@
 ---
-name: dock
+name: dock-card
 description: Keep the session dock card (.claude/dock.md) up to date so the session-dock sidebar shows goal, current block, next steps and what the session waits for. Use at session start, after finishing a block, when blocked, and before going idle.
 ---
 

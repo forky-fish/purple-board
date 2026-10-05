@@ -1,57 +1,58 @@
 # session-dock
 
-A sidebar for Claude Code sessions: the most important facts of a session as
-rendered Markdown in a narrow tmux pane next to the session.
+An overview pane for Claude Code sessions: model, context, usage limits, git
+branch, and a resettable list of what happened while you were away.
 
-```
-┌──────────────────────────────┬──────────────────────┐
-│ claude                       │ EXAMPLE APP          │
-│                              │ ━━━━━━━━━━━          │
-│ > working on block 3 …       │ Goal: ship settings  │
-│                              │                      │
-│                              │ Now                  │
-│                              │ • Block 3: keyboard  │
-│                              │                      │
-│                              │ Waiting for          │
-│                              │ ☐ GATE sync decision │
-│                              │ ──────────────────── │
-│                              │ Live                 │
-│                              │ branch: feature/x    │
-└──────────────────────────────┴──────────────────────┘
-```
+Three views, one data model (`<project>/.claude/dock-state.json`, written by the plugin):
 
-Claude Code has no sidebar API, so the dock is a tmux side pane. Two parts:
+| View | How | Needs |
+|---|---|---|
+| **Native pane** (main) | `/sdock`: docks beside the transcript (fullscreen, 110+ columns) or sits above the prompt on narrow terminals | the plugin only |
+| **tmux pane** | `session-dock open` | tmux, Node |
+| **Browser** | `session-dock serve` → http://127.0.0.1:7777 | Node |
 
-- `bin/session-dock`: renderer and watcher (Node, no dependencies). It renders
-  `<project>/.claude/dock.md` and appends live git facts (branch, last commit,
-  uncommitted files). It redraws when the card changes and every 5 seconds.
-- `skills/dock`: a Claude Code skill (shipped as the `session-dock` plugin) that tells the
-  session to keep the card current: goal, now, next, waiting for, notes.
+The plugin changes nothing outside itself: no `settings.json` edits, no hooks or
+status line to install. It reads session figures through the plugin API and writes one
+file into the project's `.claude/` (turn off with the `writeState` option).
+
+## Overview content
+
+- session name, model, branch (ahead/behind), uncommitted files
+- context fill, 5 h / 7 d rate limits, cost
+- **Since you were away** (button *Reset*, or `/sdock reset`): turns and working time,
+  commits since the reset (from Git), files edited, test runs, subagents. Built from
+  tool events and Git; the model writes none of it.
+- **Card** tab: your `.claude/dock.md` rendered; **Git** tab: status and recent commits.
 
 ## Install
-
-```sh
-git clone https://github.com/forky-fish/purple-board ~/.local/share/session-dock
-ln -s ~/.local/share/session-dock/bin/session-dock ~/.local/bin/session-dock
-```
-
-Plugin (skill) in Claude Code:
 
 ```
 /plugin marketplace add forky-fish/purple-board
 /plugin install session-dock@purple-board
 ```
 
+Try without installing: `claude --plugin-dir /path/to/purple-board`.
+
+The tmux and browser views are the `bin/session-dock` script (Node, no dependencies):
+
+```sh
+git clone https://github.com/forky-fish/purple-board ~/.local/share/session-dock
+ln -s ~/.local/share/session-dock/bin/session-dock ~/.local/bin/session-dock
+```
+
 ## Use
 
-Inside the tmux window of a Claude Code session, in the project directory:
+`/sdock` opens the pane (`/sdock close`, `/sdock reset`). Keys in the pane: `1` `2` `3`
+tabs, `x` reset, `r` reload.
+
+tmux view, inside the tmux window of the session, in the project directory:
 
 ```sh
 session-dock init      # create .claude/dock.md from the template
 session-dock open      # open the dock pane on the right
 ```
 
-Other commands: `session-dock render [dir]` prints once, `session-dock watch [dir]`
+Other commands: `session-dock serve` (browser), `session-dock reset`, `session-dock render [dir]` prints once, `session-dock watch [dir]`
 is what the pane runs. `SESSION_DOCK_WIDTH` sets the pane width (default 44),
 `SESSION_DOCK_FILE` points to another card.
 

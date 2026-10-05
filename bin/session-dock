@@ -5,7 +5,11 @@
 //   session-dock watch [dir]    render continuously (what the dock pane runs)
 //   session-dock render [dir]   render once to stdout
 //   session-dock init [dir]     create .claude/dock.md from the template if missing
+//   session-dock serve [dir]    browser dock on http://127.0.0.1:7777 (SESSION_DOCK_PORT)
+//   session-dock reset [dir]    start a new "since you were away" window
 //
+// The session-dock plugin writes <dir>/.claude/dock-state.json; all views read that file.
+
 // The card lives at <dir>/.claude/dock.md (override with SESSION_DOCK_FILE).
 // Live git facts (branch, last commit, uncommitted files) are appended below the card.
 
@@ -147,6 +151,38 @@ function liveFacts(dir, width) {
   return out;
 }
 
+function readState(dir) {
+  try { return JSON.parse(fs.readFileSync(path.join(dir, '.claude', 'dock-state.json'), 'utf8')); } catch { return null; }
+}
+
+const label = (k) => ({ five_hour: '5h', seven_day: '7d' }[k] || String(k).slice(0, 7));
+
+function meter(p, w = 16) {
+  const n = Math.max(0, Math.min(100, Math.round(p ?? 0)));
+  const f = Math.round((n / 100) * w);
+  const c = n >= 85 ? S.red : n >= 65 ? S.yellow : S.green;
+  return `${c}${'█'.repeat(f)}${S.grey}${'░'.repeat(w - f)}${S.reset} ${n}%`;
+}
+
+function stateOverview(state, width) {
+  if (!state) return [`${S.grey}no dock-state.json: install the session-dock plugin${S.reset}`, ''];
+  const { session: se = {}, usage: u = {}, digest: d = {} } = state;
+  const out = [`${S.bold}${S.purple}${se.name || 'session'}${S.reset} ${S.grey}${se.model || ''}${S.reset}`, ''];
+  out.push(`${S.grey}context${S.reset} ${meter(u.contextPercent)}`);
+  for (const r of u.rateLimits || []) out.push(`${S.grey}${label(r.kind).padEnd(7)}${S.reset} ${meter(r.percentUsed)}`);
+  if (u.costUsd !== undefined) out.push(`${S.grey}cost${S.reset}    $${u.costUsd.toFixed(2)}`);
+  out.push('', `${S.bold}${S.purple}Since you were away${S.reset} ${S.grey}(session-dock reset)${S.reset}`);
+  const files = d.files || [];
+  const bullets = [`${d.turns || 0} turns, ${Math.round((d.workMs || 0) / 60000)} min of work`];
+  if ((state.commits || []).length) bullets.push(`${state.commits.length} commits`, ...state.commits.slice(0, 4).map((c) => `  ${S.cyan}${c.slice(0, width - 4)}${S.reset}`));
+  if (files.length) bullets.push(`${files.length} files edited: ${files.slice(-4).join(', ')}`);
+  if (d.tests) bullets.push(`tests run ${d.tests}x`);
+  if (d.agents) bullets.push(`${d.agents} subagents`);
+  for (const b of bullets) out.push(...wrap(b.startsWith('  ') ? b : `${S.purple}•${S.reset} ${b}`, width, '  '));
+  out.push('');
+  return out;
+}
+
 function render(dir, width) {
   const file = cardPath(dir);
   let body;
@@ -160,7 +196,7 @@ function render(dir, width) {
   } catch {
     body = renderMarkdown(`# No dock card\n\nCreate \`${path.relative(dir, file) || file}\` or run \`session-dock init\`.`, width);
   }
-  return [...body, ...liveFacts(dir, width)].join('\n');
+  return [...stateOverview(readState(dir), width), ...body, ...liveFacts(dir, width)].join('\n');
 }
 
 function width() {
@@ -196,6 +232,27 @@ function init(dir) {
   console.log(`created: ${file}`);
 }
 
+function resetWindow(dir) {
+  fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.claude', 'dock-cmd.json'), JSON.stringify({ reset: Date.now() }));
+}
+
+function serve(dir) {
+  const http = require('http');
+  const port = Number(process.env.SESSION_DOCK_PORT || 7777);
+  const page = fs.readFileSync(path.join(__dirname, '..', 'web', 'index.html'));
+  http.createServer((req, res) => {
+    if (req.url === '/state') {
+      const state = readState(dir) || {};
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify(state));
+    }
+    if (req.url === '/reset' && req.method === 'POST') { resetWindow(dir); res.writeHead(204); return res.end(); }
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(page);
+  }).listen(port, '127.0.0.1', () => console.log(`session-dock: http://127.0.0.1:${port} (${dir})`));
+}
+
 const [cmd = 'render', dirArg] = process.argv.slice(2);
 const dir = path.resolve(dirArg || process.cwd());
 switch (cmd) {
@@ -203,7 +260,9 @@ switch (cmd) {
   case 'watch': watch(dir); break;
   case 'render': console.log(render(dir, width())); break;
   case 'init': init(dir); break;
+  case 'serve': serve(dir); break;
+  case 'reset': resetWindow(dir); console.log('reset requested'); break;
   default:
-    console.error('usage: session-dock open|watch|render|init [dir]');
+    console.error('usage: session-dock open|watch|render|init|serve|reset [dir]');
     process.exit(2);
 }

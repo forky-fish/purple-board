@@ -298,11 +298,56 @@ function serve(dir) {
       return json(200, record ? { ...record, card: readCard(dir) } : {});
     }
     if (url === '/sessions') return json(200, { rows: sessionRows(), current: (readState(dir) || { view: { session: {} } }).view.session.id });
+    if (url === '/notes' && req.method === 'GET') return json(200, notesPayload(dir));
+    if (url === '/notes' && req.method === 'POST') return readBody(req, (body) => { changeNotes(dir, body); json(200, notesPayload(dir)); });
     if (url === '/reset' && req.method === 'POST') { res.writeHead(resetWindow(dir) ? 204 : 404); return res.end(); }
     if (url !== '/') { res.writeHead(404); return res.end(); }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     res.end(page);
   }).listen(port, '127.0.0.1', () => console.log(`session-dock: http://127.0.0.1:${port} (${dir})`));
+}
+
+// Notes: same files and format as the notes module of the plugin.
+const slug = (root) => String(root).replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(-80) || 'root';
+const notesFile = (dir, scope) => path.join(HOME_DIR, 'notes', scope === 'global' ? 'global.md' : path.join('projects', slug(dir) + '.md'));
+const NOTE = /^- \[( |x|X)\] (.*)$/;
+
+function readNotes(dir, scope) {
+  let src = '';
+  try { src = fs.readFileSync(notesFile(dir, scope), 'utf8'); } catch { /* none yet */ }
+  return src.split('\n').filter((l, i, a) => l !== '' || i < a.length - 1).map((raw) => {
+    const m = raw.match(NOTE);
+    return m ? { raw, done: m[1] !== ' ', text: m[2] } : { raw };
+  });
+}
+
+function changeNotes(dir, body) {
+  const scope = body.scope === 'global' ? 'global' : 'project';
+  const lines = readNotes(dir, scope);
+  const at = lines[body.index];
+  if (body.op === 'add') {
+    const text = String(body.text || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+    if (!text) return false;
+    lines.push({ raw: `- [ ] ${text}` });
+  } else if (at && at.text === body.text && body.op === 'toggle') {
+    lines[body.index] = { raw: `- [${at.done ? ' ' : 'x'}] ${at.text}` };
+  } else if (at && at.text === body.text && body.op === 'delete') {
+    lines.splice(body.index, 1);
+  } else return false;
+  fs.mkdirSync(path.dirname(notesFile(dir, scope)), { recursive: true });
+  fs.writeFileSync(notesFile(dir, scope), lines.map((l) => l.raw).join('\n') + '\n');
+  return true;
+}
+
+function notesPayload(dir) {
+  const view = (scope) => readNotes(dir, scope).map((l, index) => ({ ...l, index })).filter((l) => l.text !== undefined).map(({ index, done, text }) => ({ index, done, text }));
+  return { project: view('project'), global: view('global') };
+}
+
+function readBody(req, cb) {
+  let data = '';
+  req.on('data', (c) => { data += c; if (data.length > 20000) req.destroy(); });
+  req.on('end', () => { try { cb(JSON.parse(data || '{}')); } catch { cb({}); } });
 }
 
 // Recently active sessions (24 h), joined with Claude Code's live session files.

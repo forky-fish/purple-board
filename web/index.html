@@ -18,6 +18,7 @@ button:hover{border-color:var(--acc)}ul{padding-left:20px;margin:6px 0}li{margin
 .card h1,.card h2,.card h3{font-size:14px;text-transform:none;letter-spacing:0;color:var(--fg);margin:12px 0 4px}
 .tabs{display:flex;gap:4px;margin-bottom:12px;border-bottom:1px solid var(--line)}.tabs button{border:0;border-bottom:2px solid transparent;border-radius:0;background:none;color:var(--mut)}.tabs button.on{color:var(--fg);border-bottom-color:var(--acc)}
 .srow{display:grid;grid-template-columns:14px 1fr auto;gap:2px 8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}.srow.dim{opacity:.55}.srow .meta{grid-column:2/4;color:var(--mut)}
+.note{display:flex;gap:8px;align-items:center;padding:3px 0}.note span{flex:1}.note.done span{color:var(--mut);text-decoration:line-through}.note button{padding:0 6px}form.row{gap:8px;margin-bottom:8px}form input,form select{font:inherit;font-size:13px;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:4px 8px}form input{flex:1}
 </style></head><body><main><nav class="tabs" id="tabs"></nav><div id="app"><p class="sub">loading…</p></div></main>
 <script>
 const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -34,13 +35,23 @@ const SPARK='▁▂▃▄▅▆▇█';
 const spark=v=>(v||[]).length<2?'':v.map(x=>SPARK[Math.min(7,Math.max(0,Math.floor(x/100*8)))]).join('');
 const lab=k=>({five_hour:'5 h',seven_day:'7 d'})[k]||k;
 let tab=(()=>{try{return localStorage.getItem('dock-tab')||'overview'}catch{return 'overview'}})();
-const TABS=[['overview','Overview'],['sessions','Sessions']];
+const TABS=[['overview','Overview'],['sessions','Sessions'],['notes','Notes']];
 function drawTabs(){const t=document.getElementById('tabs');t.innerHTML=TABS.map(([id,l])=>`<button data-t="${id}" class="${id===tab?'on':''}">${l}</button>`).join('');
  t.querySelectorAll('button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;try{localStorage.setItem('dock-tab',tab)}catch{}draw()})}
 const DOTC={busy:'var(--warn)',idle:'var(--ok)',waiting:'var(--bad)',gone:'var(--mut)'};
 async function drawSessions(){let r;try{r=await (await fetch('/sessions')).json()}catch{return}
  document.getElementById('app').innerHTML=r.rows.length?r.rows.map(x=>`<div class="srow${x.status==='gone'?' dim':''}"><span class="dot" style="background:${DOTC[x.status]}"></span><span><b>${x.id===r.current?'▸ ':''}${esc(x.name)}</b> <code>${esc(x.project)}</code></span><span class="sub">${ago(Date.now()-x.updatedAt)}</span><span class="meta">${esc(x.model)} · ${typeof x.context==='number'?Math.round(x.context)+'% ctx':'–'}${x.branch?' · ⎇ '+esc(x.branch):''}</span></div>`).join(''):'<p class="sub">No session active in the last 24 hours.</p>'}
-async function draw(){drawTabs();if(tab==='sessions')return drawSessions();return drawOverview()}
+let noteScope='project';
+async function postNote(b){const r=await fetch('/notes',{method:'POST',body:JSON.stringify(b)});return r.json()}
+function noteList(n,scope,title){return `<h2>${title}</h2>`+(n.length?n.map(x=>`<div class="note${x.done?' done':''}"><button data-op="toggle" data-s="${scope}" data-i="${x.index}" data-t="${esc(x.text).replace(/"/g,'&quot;')}">${x.done?'☑':'☐'}</button><span>${esc(x.text)}</span><button data-op="delete" data-s="${scope}" data-i="${x.index}" data-t="${esc(x.text).replace(/"/g,'&quot;')}">✕</button></div>`).join(''):'<p class="sub">no notes</p>')}
+async function drawNotes(){const typing=document.getElementById('nt');if(typing&&typing.value)return; // do not wipe a half-typed note
+ let n;try{n=await (await fetch('/notes')).json()}catch{return}
+ const app=document.getElementById('app');
+ app.innerHTML=`<form id="nf" class="row"><select id="ns"><option value="project">project</option><option value="global">global</option></select><input id="nt" placeholder="new note" autocomplete="off"><button>Add</button></form>`+noteList(n.project,'project','This project')+noteList(n.global,'global','Global');
+ document.getElementById('ns').value=noteScope;document.getElementById('ns').onchange=e=>noteScope=e.target.value;
+ document.getElementById('nf').onsubmit=async e=>{e.preventDefault();const t=document.getElementById('nt');const v=t.value.trim();if(!v)return;t.value='';await postNote({op:'add',scope:document.getElementById('ns').value,text:v});drawNotes()};
+ app.querySelectorAll('.note button').forEach(b=>b.onclick=async()=>{await postNote({op:b.dataset.op,scope:b.dataset.s,index:+b.dataset.i,text:b.dataset.t});drawNotes()})}
+async function draw(){drawTabs();if(tab==='sessions')return drawSessions();if(tab==='notes')return drawNotes();return drawOverview()}
 async function drawOverview(){let s;try{s=await (await fetch('/state')).json()}catch{return}
  if(!s.view){document.getElementById('app').innerHTML='<p class="sub">no session found for this directory: start Claude Code here with the session-dock plugin</p>';return}
  const {session:se={},usage:u={},git:g={},commits=[]}=s.view,ov=(s.state.modules||{}).overview||{},d=ov.away||{},files=d.files||[];

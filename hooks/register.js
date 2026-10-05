@@ -9,6 +9,7 @@
 import overview from './modules/overview.js'
 import gitTab from './modules/git.js'
 import sessions from './modules/sessions.js'
+import notes from './modules/notes.js'
 import { fileModule } from './modules/file.js'
 import { commandModule } from './modules/command.js'
 
@@ -19,10 +20,11 @@ const SAVE_EVERY_MS = 5000
 const BUILTIN = {
   overview,
   sessions,
+  notes,
   card: fileModule({ id: 'card', title: 'Card', file: '.claude/dock.md' }),
   git: gitTab,
 }
-const DEFAULT_TABS = ['overview', 'sessions', 'card', 'git']
+const DEFAULT_TABS = ['overview', 'sessions', 'notes', 'card', 'git']
 
 let options = {}
 

@@ -1,27 +1,17 @@
 {
   "name": "session-dock",
-  "version": "0.2.0",
-  "description": "Overview pane for a Claude Code session: model, context, usage, git, and a resettable digest of what happened while you were away. Docks beside the transcript or sits above the prompt.",
-  "author": { "name": "forky-fish" },
+  "version": "0.3.0",
+  "description": "Session dock for Claude Code: a pane of tabs (overview, digest since you were away, card, git, your own files and commands). Docks beside the transcript or sits above the prompt. Writes nothing into projects and nothing into the context.",
+  "author": {
+    "name": "forky-fish"
+  },
   "license": "MIT",
   "userConfig": {
-    "cardFile": {
-      "type": "string",
-      "title": "Card file",
-      "description": "Markdown card shown on the Card tab, relative to the project root.",
-      "default": ".claude/dock.md"
-    },
     "refreshSeconds": {
       "type": "number",
       "title": "Refresh interval (seconds)",
       "description": "How often an open pane reloads git and usage.",
       "default": 15
-    },
-    "writeState": {
-      "type": "boolean",
-      "title": "Write state file",
-      "description": "Write .claude/dock-state.json so the tmux and browser docks can show the same data. Off: nothing is written outside the plugin store.",
-      "default": true
     }
   }
 }

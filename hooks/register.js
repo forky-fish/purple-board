@@ -1,73 +1,30 @@
-// session-dock: /sdock opens an overview pane (docked beside the transcript, or above the prompt on narrow terminals).
-//   Overview: model, context, usage, git, and a digest of what happened since the last reset.
-//   Card:     the project's .claude/dock.md, rendered.   Git: branch, status, recent commits.
-// The digest is built from tool and turn events and from Git; the model writes nothing into it.
+// session-dock core: /sdock opens a pane of tabs, each tab a module (hooks/modules/).
+// The pane docks beside the transcript (fullscreen, 110+ columns) or sits above the prompt.
+//
+// Token rule: no hook here returns text into the transcript or prompt. Tool results pass
+// through unchanged; everything the dock learns goes to its own files.
+//
+// State lives per session in ~/.claude/session-dock/sessions/<session id>.json; nothing is
+// written into projects. The tmux and browser views (bin/session-dock) read the same files.
+import overview from './modules/overview.js'
+import gitTab from './modules/git.js'
+import { fileModule } from './modules/file.js'
+import { commandModule } from './modules/command.js'
+
 const PANE = 'session-dock'
-const MAX_CHARS = 9500 // Markdown and Code elements take at most 10,000 characters
-const STATE_FILE = '.claude/dock-state.json'
-const CMD_FILE = '.claude/dock-cmd.json'
-const TEST_RE = /\b(npm|pnpm|yarn)\s+(run\s+)?test\b|\bpytest\b|\bcargo\s+test\b|\bgo\s+test\b|\bvitest\b|\bjest\b|\bnode\s+--test\b/
-const MAX_FILES = 200
+const COMMAND = 'sdock'
+const SAVE_EVERY_MS = 5000
+
+const BUILTIN = {
+  overview,
+  card: fileModule({ id: 'card', title: 'Card', file: '.claude/dock.md' }),
+  git: gitTab,
+}
+const DEFAULT_TABS = ['overview', 'card', 'git']
 
 let options = {}
-let tab = 'overview'
-let root = ''
-let digest = freshDigest(0, '')
-let view = { session: {}, usage: {}, git: {}, card: '', cardPath: '', commits: [], updated: '' }
-let lastSaved = 0
-let busy = false
-const SPARK = '▁▂▃▄▅▆▇█'
-const HISTORY_MAX = 40
-const WARN = 65
-const ALARM = 85
 
-function freshDigest(since, head) {
-  return { since, head, turns: 0, workMs: 0, files: {}, commands: 0, tests: 0, agents: 0, notes: [], history: [] }
-}
-
-function clip(text) {
-  return text.length > MAX_CHARS ? text.slice(0, MAX_CHARS) + '\n\n… (cut off)' : text
-}
-
-function absolute(path) {
-  return path.startsWith('/') ? path : root + '/' + path
-}
-
-function bar(percent, width = 20) {
-  const p = Math.max(0, Math.min(100, Math.round(percent ?? 0)))
-  const filled = Math.round((p / 100) * width)
-  return '█'.repeat(filled) + '░'.repeat(width - filled) + ' ' + p + '%'
-}
-
-function level(percent) {
-  return percent >= ALARM ? 'red' : percent >= WARN ? 'yellow' : 'green'
-}
-
-function sparkline(values) {
-  if (values.length < 2) return ''
-  return values.map((v) => SPARK[Math.min(7, Math.max(0, Math.floor((v / 100) * 8)))]).join('')
-}
-
-function limitLabel(kind) {
-  return { five_hour: '5h', seven_day: '7d' }[kind] || String(kind).slice(0, 7)
-}
-
-function sample() {
-  const p = view.usage.contextPercent
-  if (typeof p !== 'number') return
-  digest.history.push(Math.round(p))
-  if (digest.history.length > HISTORY_MAX) digest.history = digest.history.slice(-HISTORY_MAX)
-}
-
-function ago(ms) {
-  const m = Math.round(ms / 60000)
-  if (m < 1) return 'just now'
-  if (m < 60) return m + ' min ago'
-  const h = Math.round(m / 6) / 10
-  return h < 48 ? h + ' h ago' : Math.round(h / 24) + ' d ago'
-}
-
-async function git($, args) {
+async function git($, root, args) {
   try {
     const r = await $.process.run(['git', ...args], { cwd: root, timeoutMs: 5000 })
     return r.exitCode === 0 ? r.stdout.trim() : null
@@ -75,81 +32,181 @@ async function git($, args) {
     return null
   }
 }
+let boot = null // init promise, once per load of this module (a hot reload starts over)
+let ctx = null
+let lastSaved = 0
 
-async function sessionName($, id) {
-  // Best effort: ~/.claude/sessions/<pid>.json carries the session's name.
-  try {
-    const home = await $.env.get('HOME')
-    if (!home) return undefined
-    for (const entry of await $.fs.list(home + '/.claude/sessions')) {
-      if (!String(entry.name).endsWith('.json')) continue
-      try {
-        const info = JSON.parse(await $.fs.read(home + '/.claude/sessions/' + entry.name))
-        if (info.sessionId === id) return info.name
-      } catch { /* next */ }
-    }
-  } catch { /* directory missing */ }
-  return undefined
+function emptyView() {
+  return { session: {}, usage: {}, git: {}, commits: [] }
 }
 
-async function load($) {
-  root = await $.session.root()
-  const id = await $.session.id()
-  const usage = await $.session.usage()
-  const branch = await git($, ['branch', '--show-current'])
-  const head = await git($, ['rev-parse', '--short', 'HEAD'])
-  const status = await git($, ['status', '--short'])
-  const log = await git($, ['log', '--oneline', '-8'])
-  const upstream = await git($, ['rev-list', '--left-right', '--count', '@{upstream}...HEAD'])
-  let commits = []
-  if (digest.head && head && digest.head !== head) {
-    const range = await git($, ['log', '--oneline', '-20', digest.head + '..HEAD'])
-    if (range) commits = range.split('\n')
+async function readJson($, path) {
+  try { return JSON.parse(await $.fs.read(path)) } catch { return null }
+}
+
+// Global config: ~/.claude/session-dock/config.json. Project config: <root>/.claude/dock.json.
+// { "tabs": ["overview", "git", { "id": "todo", "title": "Todo", "file": "TODO.md" },
+//            { "id": "status", "title": "Status", "command": ["purplectl", "project", "status"] }] }
+// A project config may list built-in and file tabs; command tabs count only from the global one.
+function buildTabs(globalConfig, projectConfig) {
+  const fromProject = Array.isArray(projectConfig?.tabs)
+  const list = (fromProject ? projectConfig.tabs : globalConfig?.tabs) || DEFAULT_TABS
+  const tabs = []
+  for (const entry of list) {
+    if (typeof entry === 'string' && BUILTIN[entry]) tabs.push(BUILTIN[entry])
+    else if (entry && typeof entry === 'object' && /^[\w-]{1,32}$/.test(entry.id || '')) {
+      const title = String(entry.title || entry.id).slice(0, 20)
+      if (typeof entry.file === 'string') tabs.push(fileModule({ id: entry.id, title, file: entry.file }))
+      else if (!fromProject && Array.isArray(entry.command) && entry.command.length) tabs.push(commandModule({ id: entry.id, title, command: entry.command.map(String) }))
+    }
+  }
+  return tabs.length ? tabs : DEFAULT_TABS.map((id) => BUILTIN[id])
+}
+
+async function init($) {
+  const home = await $.env.get('HOME')
+  const dir = home + '/.claude/session-dock'
+  const root = await $.session.root()
+  const sessionId = await $.session.id()
+  const saved = await readJson($, dir + '/sessions/' + sessionId + '.json')
+  const state = saved?.v === 2 && saved.state ? saved.state : { since: Date.now(), head: '', modules: {} }
+  if (!state.head) state.head = (await git($, root, ['rev-parse', '--short', 'HEAD'])) || ''
+  const tabs = buildTabs(await readJson($, dir + '/config.json'), await readJson($, root + '/.claude/dock.json'))
+
+  ctx = {
+    root, sessionId, dir, state, tabs,
+    tab: tabs[0].id,
+    view: emptyView(),
+    busy: false,
+    liveData: {},
+    // Persistent per-session data of a module (saved with the session).
+    data(id, make) {
+      if (!state.modules[id]) state.modules[id] = make()
+      return state.modules[id]
+    },
+    // Volatile data of a module (refilled by its load()).
+    live(id) {
+      if (!ctx.liveData[id]) ctx.liveData[id] = {}
+      return ctx.liveData[id]
+    },
   }
 
-  let card = ''
-  const cardPath = absolute(options.cardFile || '.claude/dock.md')
-  try { card = await $.fs.read(cardPath) } catch { /* no card */ }
+  try {
+    await $.command.register({ name: COMMAND, description: 'Session dock: overview, digest since reset, more tabs', immediate: true })
+  } catch { /* already registered in this load */ }
 
+  // Timers touch git only while the pane is open; the command file lets the browser view press Reset.
+  $.clock.every(Math.max(5, options.refreshSeconds || 15) * 1000, async () => {
+    try {
+      const cmdFile = dir + '/cmd/' + sessionId + '.json'
+      if (await $.fs.exists(cmdFile)) {
+        const cmd = await readJson($, cmdFile)
+        await $.fs.write(cmdFile, '{}')
+        if (cmd?.reset) await reset($)
+      }
+      if (await isOpen($)) await refresh($)
+    } catch { /* next tick */ }
+  })
+  Object.assign(ctx, io($))
+  return ctx
+}
+
+// What modules may do, as closures over this dispatch's $ (the plugin API never leaves this file).
+function io($) {
+  return {
+    readFile: (path) => $.fs.read(path),
+    writeFile: (path, text) => $.fs.write(path, text),
+    exists: (path) => $.fs.exists(path),
+    list: (path) => $.fs.list(path),
+    run: (argv, timeoutMs = 15000) => $.process.run(argv, { cwd: ctx.root, timeoutMs }),
+    reset: () => reset($),
+    invalidate: () => $.ui.invalidate('ui.render'),
+    refresh: () => refresh($),
+  }
+}
+
+// Every hook calls this first: after a hot reload, session.start does not run again.
+async function ensure($) {
+  if (!boot) boot = init($).catch((error) => { boot = null; throw error })
+  const c = await boot
+  Object.assign(c, io($))
+  return c
+}
+
+async function loadView($) {
+  const root = ctx.root
+  const usage = await $.session.usage()
+  const branch = await git($, root, ['branch', '--show-current'])
+  const head = await git($, root, ['rev-parse', '--short', 'HEAD'])
+  const status = await git($, root, ['status', '--short'])
+  const log = await git($, root, ['log', '--oneline', '-8'])
+  const upstream = await git($, root, ['rev-list', '--left-right', '--count', '@{upstream}...HEAD'])
+  let commits = []
+  if (ctx.state.head && head && ctx.state.head !== head) {
+    const range = await git($, root, ['log', '--oneline', '-20', ctx.state.head + '..HEAD'])
+    if (range) commits = range.split('\n')
+  }
   const [behind, ahead] = upstream ? upstream.split(/\s+/).map(Number) : [undefined, undefined]
-  view = {
+  const previous = ctx.view.session
+  const info = await readJson($, (await $.env.get('HOME')) + '/.claude/sessions/' + (await sessionFile($)))
+  ctx.view = {
     session: {
-      id, name: await sessionName($, id), model: await $.session.model(), cwd: root,
-      startedAt: usage.startedAt, turns: await $.session.turns(), busy,
+      id: ctx.sessionId, name: info?.name ?? previous.name, model: await $.session.model(), cwd: root,
+      startedAt: usage.startedAt, turns: await $.session.turns(), busy: ctx.busy,
     },
     usage: {
       contextPercent: usage.context.percent, contextTokens: usage.context.tokens, contextWindow: usage.context.window,
       rateLimits: usage.rateLimits, costUsd: usage.cost?.usd,
     },
-    git: { branch, head, ahead, behind, dirty: (status || '').split('\n').filter(Boolean).length, status: status || '', log: log || '' },
-    card, cardPath, commits, updated: new Date().toLocaleTimeString(),
+    git: branch === null ? {} : { branch, head, ahead, behind, dirty: (status || '').split('\n').filter(Boolean).length, status: status || '', log: log || '' },
+    commits,
   }
 }
 
-async function persist($, force) {
+// ~/.claude/sessions/<pid>.json carries the session's name; remember which file is ours.
+let ownSessionFile = null
+async function sessionFile($) {
+  if (ownSessionFile) return ownSessionFile
+  try {
+    const home = await $.env.get('HOME')
+    for (const entry of await $.fs.list(home + '/.claude/sessions')) {
+      const name = String(entry.name)
+      if (!name.endsWith('.json')) continue
+      const info = await readJson($, home + '/.claude/sessions/' + name)
+      if (info?.sessionId === ctx.sessionId) return (ownSessionFile = name)
+    }
+  } catch { /* no directory */ }
+  return 'none'
+}
+
+async function save($, force) {
   const now = Date.now()
-  if (!force && now - lastSaved < 5000) return
+  if (!force && now - lastSaved < SAVE_EVERY_MS) return
   lastSaved = now
   try {
-    await $.store.set('digest:' + root, digest)
-    if (options.writeState !== false && root) {
-      const model = { v: 1, updatedAt: now, ...view, digest: { ...digest, files: Object.keys(digest.files) } }
-      await $.fs.write(absolute(STATE_FILE), JSON.stringify(model, null, 2))
-    }
+    const record = { v: 2, updatedAt: now, state: ctx.state, view: ctx.view }
+    await $.fs.write(ctx.dir + '/sessions/' + ctx.sessionId + '.json', JSON.stringify(record, null, 1))
   } catch { /* the dock never breaks a session */ }
 }
 
+function dispatch(ev) {
+  for (const module of ctx.tabs) {
+    try { module.event?.(ctx, ev) } catch { /* a module never breaks a session */ }
+  }
+}
+
 async function reset($) {
-  const head = await git($, ['rev-parse', '--short', 'HEAD'])
-  digest = freshDigest(Date.now(), head || '')
-  await load($)
-  await persist($, true)
-  $.ui.invalidate('ui.render')
+  ctx.state.since = Date.now()
+  ctx.state.head = (await git($, ctx.root, ['rev-parse', '--short', 'HEAD'])) || ''
+  dispatch({ type: 'reset' })
+  await refresh($)
 }
 
 async function refresh($) {
-  try { await load($) } catch (error) { view = { ...view, updated: 'load failed: ' + String(error) } }
-  await persist($, true)
+  try { await loadView($) } catch { /* keep the last view */ }
+  const active = ctx.tabs.find((m) => m.id === ctx.tab)
+  try { await active?.load?.(ctx) } catch { /* module shows what it has */ }
+  await save($, true)
   $.ui.invalidate('ui.render')
 }
 
@@ -157,190 +214,91 @@ async function isOpen($) {
   return (await $.ui.panes()).some((pane) => pane.id === PANE)
 }
 
-function track(e) {
-  const tool = e.tool
-  if (tool === 'Edit' || tool === 'Write' || tool === 'MultiEdit' || tool === 'NotebookEdit') {
-    const file = e.file_path || e.notebook_path
-    if (file && Object.keys(digest.files).length < MAX_FILES) digest.files[String(file).replace(root + '/', '')] = true
-  } else if (tool === 'Bash') {
-    const command = String(e.command || '')
-    digest.commands++
-    if (TEST_RE.test(command)) digest.tests++
-    if (/\bgit\s+push\b/.test(command)) digest.notes.push('git push at ' + new Date().toLocaleTimeString())
-  } else if (tool === 'Agent' || tool === 'Task') {
-    digest.agents++
-  }
-  if (digest.notes.length > 20) digest.notes = digest.notes.slice(-20)
-}
-
-function overviewMarkdown() {
-  const { session: s, git: g } = view
-  const lines = []
-  lines.push('`' + (s.model || '?') + '`')
-  if (g.branch !== undefined && g.branch !== null) {
-    const sync = g.ahead || g.behind ? ' (↑' + (g.ahead || 0) + ' ↓' + (g.behind || 0) + ')' : ''
-    lines.push('branch `' + (g.branch || 'detached') + '`' + sync + ' · ' + (g.dirty ? g.dirty + ' uncommitted' : 'clean'))
-  }
-  return lines.join('\n')
-}
-
-function digestMarkdown() {
-  const files = Object.keys(digest.files)
-  const lines = []
-  lines.push('*since ' + (digest.since ? ago(Date.now() - digest.since) : 'session start') + '*')
-  lines.push('')
-  if (!digest.turns && !digest.commands && !files.length && !view.commits.length) {
-    lines.push('- nothing yet')
-    return lines.join('\n')
-  }
-  lines.push('- ' + digest.turns + ' turns, ' + Math.round(digest.workMs / 60000) + ' min of work')
-  if (view.commits.length) {
-    lines.push('- ' + view.commits.length + ' commit' + (view.commits.length > 1 ? 's' : ''))
-    for (const c of view.commits.slice(0, 5)) lines.push('  - `' + c.slice(0, 70) + '`')
-  }
-  if (files.length) lines.push('- ' + files.length + ' file' + (files.length > 1 ? 's' : '') + ' edited: ' + files.slice(-6).map((f) => '`' + f + '`').join(', '))
-  if (digest.tests) lines.push('- tests run ' + digest.tests + '×')
-  if (digest.agents) lines.push('- ' + digest.agents + ' subagent' + (digest.agents > 1 ? 's' : '') + ' started')
-  for (const note of digest.notes.slice(-5)) lines.push('- ' + note)
-  return lines.join('\n')
-}
-
 export function register(on, userOptions) {
   options = userOptions
 
   on('session.start', async ($, e, next) => {
+    const result = await next(e)
+    try { await ensure($) } catch { /* the dock stays off */ }
+    return result
+  })
+
+  on('turn.start', async ($, e, next) => {
     try {
-      root = await $.session.root()
-      const saved = await $.store.get('digest:' + root)
-      if (saved && typeof saved === 'object') digest = { ...freshDigest(0, ''), ...saved }
-      else digest = freshDigest(Date.now(), (await git($, ['rev-parse', '--short', 'HEAD'])) || '')
-    } catch { /* start empty */ }
-    // Timers touch git only while the pane is open; the command file lets the browser dock press Reset.
-    $.clock.every(Math.max(5, options.refreshSeconds || 15) * 1000, async () => {
-      try {
-        if (options.writeState !== false && root && (await $.fs.exists(absolute(CMD_FILE)))) {
-          const cmd = JSON.parse(await $.fs.read(absolute(CMD_FILE)))
-          await $.fs.write(absolute(CMD_FILE), '{}')
-          if (cmd.reset) await reset($)
-        }
-        if (await isOpen($)) await refresh($)
-      } catch { /* next tick */ }
-    })
-    await $.command.register({ name: 'sdock', description: 'Session overview pane (usage, git, digest since reset)', immediate: true })
+      if (!e.agentId) {
+        const c = await ensure($)
+        c.busy = true
+        c.view.session.busy = true
+        if (await isOpen($)) c.invalidate()
+      }
+    } catch { /* ignore */ }
     return next(e)
   })
 
   on('tool.call', async ($, e, next) => {
     const result = await next(e)
-    try { if (!e.agentId) track(e); await persist($, false) } catch { /* ignore */ }
+    try {
+      if (!e.agentId) {
+        await ensure($)
+        dispatch({ type: 'tool', e, result })
+        await save($, false)
+      }
+    } catch { /* ignore */ }
     return result
-  })
-
-  on('turn.start', async ($, e, next) => {
-    if (!e.agentId) { busy = true; if (await isOpen($)) { view.session.busy = true; $.ui.invalidate('ui.render') } }
-    return next(e)
   })
 
   on('turn.complete', async ($, e, next) => {
     try {
       if (!e.agentId) {
-        busy = false
-        digest.turns++
-        digest.workMs += e.durationMs || 0
-        await load($) // commits and usage are fresh at the end of each turn
-        sample()
-        await persist($, true)
-        if (await isOpen($)) $.ui.invalidate('ui.render')
+        await ensure($)
+        ctx.busy = false
+        await loadView($) // commits and usage are fresh at the end of each turn
+        dispatch({ type: 'turn', e })
+        await save($, true)
+        if (await isOpen($)) ctx.invalidate()
       }
     } catch { /* ignore */ }
     return next(e)
   })
 
   on('session.end', async ($, e, next) => {
-    try { await persist($, true) } catch { /* ignore */ }
+    try { if (ctx) await save($, true) } catch { /* ignore */ }
     return next(e)
   })
 
-  on('command.run', { command: 'sdock' }, async ($, e) => {
+  on('command.run', { command: COMMAND }, async ($, e) => {
+    const c = await ensure($)
     const arg = e.args.trim()
     if (arg === 'close') { await $.ui.close({ id: PANE }); return {} }
     if (arg === 'reset') { await reset($); return {} }
-    await load($)
-    await persist($, true)
+    if (c.tabs.some((m) => m.id === arg)) c.tab = arg
+    await refresh($)
     await $.ui.open({ id: PANE, title: 'Dock', focus: true, closeOnEscape: true })
     return {}
   })
 
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
-    if (e.requestId !== PANE) return next(e)
-    const { Box, Text, Button, Markdown, Code } = $.ui.resolve(e)
-    const redraw = () => $.ui.invalidate('ui.render')
-    const tabButton = (name, label, hotkey) =>
-      Button({ key: 'tab-' + name, label, hotkey, plain: true, dimColor: tab !== name, onPress: () => { tab = name; redraw() } })
-
+    if (e.requestId !== PANE || !ctx) return next(e)
+    Object.assign(ctx, io($))
+    const el = $.ui.resolve(e)
+    const { Box, Text, Button } = el
+    const tabs = ctx.tabs.map((m, i) =>
+      Button({
+        key: 'tab-' + m.id, label: m.title, hotkey: i < 9 ? String(i + 1) : undefined, plain: true, dimColor: ctx.tab !== m.id,
+        onPress: () => { ctx.tab = m.id; refresh($) },
+      }))
+    const active = ctx.tabs.find((m) => m.id === ctx.tab) || ctx.tabs[0]
     let body
-    if (tab === 'overview') {
-      const u = view.usage
-      const meter = (key, label, percent) => {
-        const p = Math.max(0, Math.min(100, Math.round(percent ?? 0)))
-        const filled = Math.round((p / 100) * 20)
-        return Box({
-          key, flexDirection: 'row', columnGap: 1,
-          children: [
-            Text({ dimColor: true, children: [label.padEnd(8)] }),
-            Text({ color: level(p), children: ['█'.repeat(filled)] }),
-            Text({ dimColor: true, children: ['░'.repeat(20 - filled)] }),
-            Text({ children: [String(p).padStart(3) + '%'] }),
-          ],
-        })
-      }
-      const hot = [['context', u.contextPercent], ...(u.rateLimits || []).map((r) => [limitLabel(r.kind), r.percentUsed])]
-        .filter(([, p]) => p >= ALARM)
-      const spark = sparkline(digest.history)
-      const dot = view.session.busy ? { color: 'yellow', text: '● working' } : { color: 'green', text: '● idle' }
-      body = [
-        Box({
-          key: 'head', flexDirection: 'row', columnGap: 2,
-          children: [Text({ color: dot.color, children: [dot.text] }), Text({ bold: true, children: [view.session.name || 'session'] })],
-        }),
-        Markdown({ key: 'overview', text: overviewMarkdown() }),
-        ...(hot.length
-          ? [Text({ key: 'alarm', color: 'red', bold: true, inverse: true, children: [' ⚠ ' + hot.map(([l, p]) => l + ' ' + Math.round(p) + '%').join(' · ') + (hot[0][0] === 'context' ? ' — consider /compact ' : ' ')] })]
-          : []),
-        Text({ children: [' '] }),
-        meter('m-context', 'context', u.contextPercent),
-        ...(u.rateLimits || []).map((r) => meter('m-' + r.kind, limitLabel(r.kind), r.percentUsed)),
-        ...(spark ? [Box({ key: 'spark', flexDirection: 'row', columnGap: 1, children: [Text({ dimColor: true, children: ['trend   '] }), Text({ color: 'cyan', children: [spark] })] })] : []),
-        ...(u.costUsd !== undefined ? [Text({ dimColor: true, children: ['cost     $' + u.costUsd.toFixed(2)] })] : []),
-        Text({ children: [' '] }),
-        Box({
-          flexDirection: 'row', columnGap: 2,
-          children: [
-            Text({ bold: true, children: ['Since you were away'] }),
-            Button({ key: 'reset', label: '⟲ Reset', hotkey: 'x', plain: true, onPress: () => reset($) }),
-          ],
-        }),
-        Markdown({ key: 'digest', text: clip(digestMarkdown()) }),
-      ]
-    } else if (tab === 'card') {
-      body = view.card
-        ? [Text({ dimColor: true, children: [view.cardPath] }), Markdown({ key: 'card', text: clip(view.card) })]
-        : [Text({ children: ['No card at ' + (options.cardFile || '.claude/dock.md') + '.'] })]
-    } else {
-      body = [Code({ source: clip((view.git.status || 'working tree clean') + '\n\n' + (view.git.log || '')) })]
+    try {
+      body = active.render(ctx, el, e)
+    } catch (error) {
+      body = [Text({ key: 'error', color: 'red', children: [active.id + ': ' + String(error)] })]
     }
-
     return Box({
       flexDirection: 'column',
       children: [
-        Box({
-          flexDirection: 'row', columnGap: 3,
-          children: [
-            tabButton('overview', 'Overview', '1'), tabButton('card', 'Card', '2'), tabButton('git', 'Git', '3'),
-            Button({ key: 'reload', label: 'Reload', hotkey: 'r', plain: true, onPress: () => refresh($) }),
-          ],
-        }),
-        Text({ children: [' '] }),
+        Box({ key: 'tabs', flexDirection: 'row', columnGap: 2, flexWrap: 'wrap', children: [...tabs, Button({ key: 'reload', label: '↻', hotkey: 'r', plain: true, dimColor: true, onPress: () => refresh($) })] }),
+        Text({ key: 'gap', children: [' '] }),
         ...body,
       ],
     })

@@ -282,7 +282,6 @@ export function register(on, userOptions) {
           children: [
             tabButton('overview', 'Overview', '1'), tabButton('card', 'Card', '2'), tabButton('git', 'Git', '3'),
             Button({ key: 'reload', label: 'Reload', hotkey: 'r', plain: true, onPress: () => refresh($) }),
-            Text({ dimColor: true, children: [view.updated] }),
           ],
         }),
         Text({ children: [' '] }),

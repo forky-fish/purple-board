@@ -10,6 +10,8 @@ h1{font-size:18px;margin:0}h2{font-size:13px;text-transform:uppercase;letter-spa
 .sub{color:var(--mut);font-size:13px}code{font:13px ui-monospace,monospace;background:var(--card);padding:1px 5px;border-radius:4px}
 .meter{display:grid;grid-template-columns:70px 1fr 44px;gap:8px;align-items:center;margin:6px 0;font-size:13px}
 .track{height:8px;background:var(--card);border-radius:4px;overflow:hidden}.fill{height:100%;background:var(--ok)}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px}
+.alarm{background:var(--bad);color:#fff;font-weight:600;padding:4px 10px;border-radius:6px;margin:8px 0}.spark{color:var(--acc);letter-spacing:1px}
 .row{display:flex;justify-content:space-between;align-items:center}
 button{font:inherit;font-size:13px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;padding:4px 10px;cursor:pointer}
 button:hover{border-color:var(--acc)}ul{padding-left:20px;margin:6px 0}li{margin:2px 0}
@@ -26,17 +28,25 @@ function md(t){let h='',list=false;for(const l of t.split('\n')){let m;
  else if(l.trim()){if(list){h+='</ul>';list=false}h+=`<p>${inl(l)}</p>`}}
  return h+(list?'</ul>':'')}
 function ago(ms){const m=Math.round(ms/6e4);return m<1?'just now':m<60?m+' min ago':Math.round(m/6)/10+' h ago'}
+const SPARK='▁▂▃▄▅▆▇█';
+const spark=v=>(v||[]).length<2?'':v.map(x=>SPARK[Math.min(7,Math.max(0,Math.floor(x/100*8)))]).join('');
+const lab=k=>({five_hour:'5 h',seven_day:'7 d'})[k]||k;
 async function draw(){let s;try{s=await (await fetch('/state')).json()}catch{return}
- if(!s.session){document.getElementById('app').innerHTML='<p class="sub">no dock-state.json yet: open /sdock in a session</p>';return}
- const {session:se,usage:u={},git:g={},digest:d={}}=s,files=d.files||[];
+ if(!s.view){document.getElementById('app').innerHTML='<p class="sub">no session found for this directory: start Claude Code here with the session-dock plugin</p>';return}
+ const {session:se={},usage:u={},git:g={},commits=[]}=s.view,ov=(s.state.modules||{}).overview||{},d=ov.away||{},files=d.files||[];
+ const stale=Date.now()-s.updatedAt>6e5,busy=se.busy&&!stale;
+ const hot=[['context',u.contextPercent],...(u.rateLimits||[]).map(r=>[lab(r.kind),r.percentUsed])].filter(([,p])=>p>=85);
  const b=[`${d.turns||0} turns, ${Math.round((d.workMs||0)/6e4)} min of work`];
- if((s.commits||[]).length){b.push(`${s.commits.length} commits<ul>${s.commits.slice(0,5).map(c=>`<li><code>${esc(c.slice(0,80))}</code></li>`).join('')}</ul>`)}
+ if(commits.length){b.push(`${commits.length} commits${d.pushes?', pushed':''}<ul>${commits.slice(0,5).map(c=>`<li><code>${esc(c.slice(0,80))}</code></li>`).join('')}</ul>`)}
  if(files.length)b.push(`${files.length} files edited: ${files.slice(-6).map(f=>`<code>${esc(f)}</code>`).join(' ')}`);
  if(d.tests)b.push(`tests run ${d.tests}×`);if(d.agents)b.push(`${d.agents} subagents`);
  document.getElementById('app').innerHTML=`
- <h1>${esc(se.name||'session')}</h1><div class="sub"><code>${esc(se.model||'?')}</code> · ${esc(g.branch||'no branch')}${g.dirty?' · '+g.dirty+' uncommitted':' · clean'}</div>
- <h2>Usage</h2>${meter('context',u.contextPercent)}${(u.rateLimits||[]).map(r=>meter(({five_hour:'5 h',seven_day:'7 d'})[r.kind]||r.kind,r.percentUsed)).join('')}${u.costUsd!==undefined?`<div class="sub">cost $${u.costUsd.toFixed(2)}</div>`:''}
- <div class="row"><h2>Since you were away <span class="sub">(${d.since?ago(Date.now()-d.since):'session start'})</span></h2><button id="reset">⟲ Reset</button></div>
+ <h1><span class="dot" style="background:${busy?'var(--warn)':stale?'var(--mut)':'var(--ok)'}"></span>${esc(se.name||'session')}</h1>
+ <div class="sub"><code>${esc(se.model||'?')}</code> · ${esc(g.branch||'no branch')}${g.dirty?' · '+g.dirty+' uncommitted':' · clean'}</div>
+ ${hot.length?`<div class="alarm">⚠ ${hot.map(([l,p])=>esc(l)+' '+Math.round(p)+'%').join(' · ')}</div>`:''}
+ <h2>Usage</h2>${meter('context',u.contextPercent)}${(u.rateLimits||[]).map(r=>meter(lab(r.kind),r.percentUsed)).join('')}
+ ${spark(ov.history)?`<div class="sub">trend <span class="spark">${spark(ov.history)}</span></div>`:''}${u.costUsd!==undefined?`<div class="sub">cost $${u.costUsd.toFixed(2)}</div>`:''}
+ <div class="row"><h2>Since you were away <span class="sub">(${s.state.since?ago(Date.now()-s.state.since):'session start'})</span></h2><button id="reset">⟲ Reset</button></div>
  <ul>${b.map(x=>`<li>${x}</li>`).join('')}</ul>
  ${s.card?`<h2>Card</h2><div class="card">${md(s.card)}</div>`:''}
  <p class="sub">updated ${ago(Date.now()-s.updatedAt)}</p>`;

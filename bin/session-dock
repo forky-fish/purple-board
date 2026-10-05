@@ -8,7 +8,9 @@
 //   session-dock serve [dir]    browser dock on http://127.0.0.1:7777 (SESSION_DOCK_PORT)
 //   session-dock reset [dir]    start a new "since you were away" window
 //
-// The session-dock plugin writes <dir>/.claude/dock-state.json; all views read that file.
+// The session-dock plugin writes ~/.claude/session-dock/sessions/<session id>.json; all views
+// read it. Several sessions can share a directory: the newest one wins unless you pass
+// --session <id> (or set SESSION_DOCK_SESSION). SESSION_DOCK_HOME overrides ~/.claude/session-dock.
 
 // The card lives at <dir>/.claude/dock.md (override with SESSION_DOCK_FILE).
 // Live git facts (branch, last commit, uncommitted files) are appended below the card.
@@ -151,30 +153,71 @@ function liveFacts(dir, width) {
   return out;
 }
 
+const HOME_DIR = process.env.SESSION_DOCK_HOME || path.join(require('os').homedir(), '.claude', 'session-dock');
+const SPARK = '▁▂▃▄▅▆▇█';
+let wantedSession = process.env.SESSION_DOCK_SESSION || '';
+
+function readJson(file) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+}
+
+function allRecords() {
+  const base = path.join(HOME_DIR, 'sessions');
+  let names = [];
+  try { names = fs.readdirSync(base).filter((n) => n.endsWith('.json')); } catch { /* none yet */ }
+  const out = [];
+  for (const n of names) {
+    const r = readJson(path.join(base, n));
+    if (r && r.v === 2 && r.view && r.view.session) out.push(r);
+  }
+  return out;
+}
+
+// The session this view shows: the chosen one, else the newest whose cwd is dir.
 function readState(dir) {
-  try { return JSON.parse(fs.readFileSync(path.join(dir, '.claude', 'dock-state.json'), 'utf8')); } catch { return null; }
+  const records = allRecords();
+  if (wantedSession) return records.find((r) => r.view.session.id === wantedSession) || null;
+  return records.filter((r) => r.view.session.cwd === dir).sort((a, b) => b.updatedAt - a.updatedAt)[0] || null;
 }
 
 const label = (k) => ({ five_hour: '5h', seven_day: '7d' }[k] || String(k).slice(0, 7));
+const lvl = (p) => (p >= 85 ? S.red : p >= 65 ? S.yellow : S.green);
 
 function meter(p, w = 16) {
   const n = Math.max(0, Math.min(100, Math.round(p ?? 0)));
   const f = Math.round((n / 100) * w);
-  const c = n >= 85 ? S.red : n >= 65 ? S.yellow : S.green;
-  return `${c}${'█'.repeat(f)}${S.grey}${'░'.repeat(w - f)}${S.reset} ${n}%`;
+  return `${lvl(n)}${'█'.repeat(f)}${S.grey}${'░'.repeat(w - f)}${S.reset} ${n}%`;
 }
 
-function stateOverview(state, width) {
-  if (!state) return [`${S.grey}no dock-state.json: install the session-dock plugin${S.reset}`, ''];
-  const { session: se = {}, usage: u = {}, digest: d = {} } = state;
-  const out = [`${S.bold}${S.purple}${se.name || 'session'}${S.reset} ${S.grey}${se.model || ''}${S.reset}`, ''];
-  out.push(`${S.grey}context${S.reset} ${meter(u.contextPercent)}`);
+function sparkline(values) {
+  if (!values || values.length < 2) return '';
+  return values.map((v) => SPARK[Math.min(7, Math.max(0, Math.floor((v / 100) * 8)))]).join('');
+}
+
+function stateOverview(record, width) {
+  if (!record) return [`${S.grey}no session found for this directory: start Claude Code here with the session-dock plugin${S.reset}`, ''];
+  const { session: se = {}, usage: u = {}, git: g = {} } = record.view;
+  const ov = (record.state && record.state.modules && record.state.modules.overview) || {};
+  const d = ov.away || {};
+  const commits = record.view.commits || [];
+  const stale = Date.now() - record.updatedAt > 10 * 60 * 1000;
+  const dot = se.busy && !stale ? `${S.yellow}● working${S.reset}` : `${stale ? S.grey : S.green}● ${stale ? 'idle (no update)' : 'idle'}${S.reset}`;
+  const out = [`${dot} ${S.bold}${S.purple}${se.name || 'session'}${S.reset} ${S.grey}${se.model || ''}${S.reset}`];
+  if (g.branch !== undefined && g.branch !== null) {
+    const sync = g.ahead || g.behind ? ` ↑${g.ahead || 0} ↓${g.behind || 0}` : '';
+    out.push(`⎇ ${g.branch || 'detached'}${sync} · ${g.dirty ? `${g.dirty} uncommitted` : 'clean'}`);
+  }
+  const hot = [['context', u.contextPercent], ...(u.rateLimits || []).map((r) => [label(r.kind), r.percentUsed])].filter(([, p]) => p >= 85);
+  if (hot.length) out.push(`${esc('1;7;31')} ⚠ ${hot.map(([l, p]) => `${l} ${Math.round(p)}%`).join(' · ')} ${S.reset}`);
+  out.push('', `${S.grey}context${S.reset} ${meter(u.contextPercent)}`);
   for (const r of u.rateLimits || []) out.push(`${S.grey}${label(r.kind).padEnd(7)}${S.reset} ${meter(r.percentUsed)}`);
+  const spark = sparkline(ov.history);
+  if (spark) out.push(`${S.grey}trend  ${S.reset} ${S.cyan}${spark}${S.reset}`);
   if (u.costUsd !== undefined) out.push(`${S.grey}cost${S.reset}    $${u.costUsd.toFixed(2)}`);
   out.push('', `${S.bold}${S.purple}Since you were away${S.reset} ${S.grey}(session-dock reset)${S.reset}`);
   const files = d.files || [];
   const bullets = [`${d.turns || 0} turns, ${Math.round((d.workMs || 0) / 60000)} min of work`];
-  if ((state.commits || []).length) bullets.push(`${state.commits.length} commits`, ...state.commits.slice(0, 4).map((c) => `  ${S.cyan}${c.slice(0, width - 4)}${S.reset}`));
+  if (commits.length) bullets.push(`${commits.length} commits${d.pushes ? ', pushed' : ''}`, ...commits.slice(0, 4).map((c) => `  ${S.cyan}${c.slice(0, width - 4)}${S.reset}`));
   if (files.length) bullets.push(`${files.length} files edited: ${files.slice(-4).join(', ')}`);
   if (d.tests) bullets.push(`tests run ${d.tests}x`);
   if (d.agents) bullets.push(`${d.agents} subagents`);
@@ -219,6 +262,7 @@ function open(dir) {
     console.error('session-dock open needs to run inside tmux.');
     process.exit(1);
   }
+  if (wantedSession) process.env.SESSION_DOCK_SESSION = wantedSession;
   const cols = process.env.SESSION_DOCK_WIDTH || String(WIDTH_DEFAULT);
   const r = spawnSync('tmux', ['split-window', '-h', '-d', '-l', cols, '-c', dir, process.execPath, __filename, 'watch', dir], { stdio: 'inherit' });
   process.exit(r.status ?? 1);
@@ -232,9 +276,14 @@ function init(dir) {
   console.log(`created: ${file}`);
 }
 
+// Ask the plugin (which polls ~/.claude/session-dock/cmd/<session id>.json) to start a new window.
 function resetWindow(dir) {
-  fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
-  fs.writeFileSync(path.join(dir, '.claude', 'dock-cmd.json'), JSON.stringify({ reset: Date.now() }));
+  const record = readState(dir);
+  if (!record) return false;
+  const file = path.join(HOME_DIR, 'cmd', `${record.view.session.id}.json`);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ reset: Date.now() }));
+  return true;
 }
 
 function serve(dir) {
@@ -242,18 +291,27 @@ function serve(dir) {
   const port = Number(process.env.SESSION_DOCK_PORT || 7777);
   const page = fs.readFileSync(path.join(__dirname, '..', 'web', 'index.html'));
   http.createServer((req, res) => {
-    if (req.url === '/state') {
-      const state = readState(dir) || {};
-      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-      return res.end(JSON.stringify(state));
+    const json = (code, body) => { res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
+    const url = req.url.split('?')[0];
+    if (url === '/state') {
+      const record = readState(dir);
+      return json(200, record ? { ...record, card: readCard(dir) } : {});
     }
-    if (req.url === '/reset' && req.method === 'POST') { resetWindow(dir); res.writeHead(204); return res.end(); }
+    if (url === '/reset' && req.method === 'POST') { res.writeHead(resetWindow(dir) ? 204 : 404); return res.end(); }
+    if (url !== '/') { res.writeHead(404); return res.end(); }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     res.end(page);
   }).listen(port, '127.0.0.1', () => console.log(`session-dock: http://127.0.0.1:${port} (${dir})`));
 }
 
-const [cmd = 'render', dirArg] = process.argv.slice(2);
+function readCard(dir) {
+  try { return fs.readFileSync(cardPath(dir), 'utf8'); } catch { return ''; }
+}
+
+const args = process.argv.slice(2);
+const si = args.indexOf('--session');
+if (si >= 0) { wantedSession = args[si + 1] || ''; args.splice(si, 2); }
+const [cmd = 'render', dirArg] = args;
 const dir = path.resolve(dirArg || process.cwd());
 switch (cmd) {
   case 'open': open(dir); break;
@@ -261,8 +319,8 @@ switch (cmd) {
   case 'render': console.log(render(dir, width())); break;
   case 'init': init(dir); break;
   case 'serve': serve(dir); break;
-  case 'reset': resetWindow(dir); console.log('reset requested'); break;
+  case 'reset': console.log(resetWindow(dir) ? 'reset requested' : 'no session found for this directory'); break;
   default:
-    console.error('usage: session-dock open|watch|render|init|serve|reset [dir]');
+    console.error('usage: session-dock open|watch|render|init|serve|reset [dir] [--session <id>]');
     process.exit(2);
 }

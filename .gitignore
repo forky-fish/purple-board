@@ -1,4 +1,2 @@
 .claude-plugin/types/
 tsconfig.json
-.claude/dock-state.json
-.claude/dock-cmd.json

@@ -1,12 +1,14 @@
 {
   "name": "purple-board",
-  "owner": { "name": "forky-fish" },
-  "description": "Session dock: overview pane for Claude Code sessions.",
+  "owner": {
+    "name": "forky-fish"
+  },
+  "description": "Session dock for Claude Code (work in progress).",
   "plugins": [
     {
       "name": "session-dock",
       "source": "./",
-      "description": "Overview pane for Claude Code sessions: usage, git, and a resettable digest of what happened while you were away."
+      "description": "Dock for Claude Code sessions (WIP): overview, usage, digest since you were away, notes, git and more as tabs. Zero tokens."
     }
   ]
 }

@@ -1,6 +1,6 @@
 {
   "name": "session-dock",
-  "version": "0.3.0",
+  "version": "0.4.0-wip",
   "description": "Session dock for Claude Code: a pane of tabs (overview, digest since you were away, card, git, your own files and commands). Docks beside the transcript or sits above the prompt. Writes nothing into projects and nothing into the context.",
   "author": {
     "name": "forky-fish"

@@ -1,10 +1,12 @@
 // Overview: who and where this session is, how full its context and limits are,
 // and the "since you were away" digest with its reset button.
 import { planSummary } from './plan.js'
-import { ALARM, ago, heading, limitLabel, meter, plural, sparkline, spacer } from '../lib/util.js'
+import { ALARM, ago, clock, firstLine, heading, limitLabel, meter, plural, sparkline, spacer } from '../lib/util.js'
 
 const HISTORY_MAX = 40
 const MAX_FILES = 200
+const TIMELINE_MAX = 30
+const TIMELINE_SHOWN = 5
 const TEST_RE = /\b(npm|pnpm|yarn)\s+(run\s+)?test\b|\bpytest\b|\bcargo\s+test\b|\bgo\s+test\b|\bvitest\b|\bjest\b|\bnode\s+--test\b/
 
 function fresh() {
@@ -17,9 +19,11 @@ export default {
 
   event(ctx, ev) {
     const d = ctx.data('overview', () => ({ away: fresh(), history: [] }))
-    if (ev.type === 'reset') d.away = fresh()
+    if (ev.type === 'reset') { d.away = fresh(); d.timeline = [] }
     else if (ev.type === 'turn') {
       d.away.turns++
+      const line = firstLine(ev.e.answer)
+      if (line) d.timeline = [...(d.timeline || []), { at: Date.now(), text: line }].slice(-TIMELINE_MAX)
       d.away.workMs += ev.e.durationMs || 0
       const p = ctx.view.usage.contextPercent
       if (typeof p === 'number') d.history = [...d.history, Math.round(p)].slice(-HISTORY_MAX)
@@ -93,7 +97,13 @@ export default {
       if (a.tests) bullets.push('tests run ' + a.tests + '×')
       if (a.agents) bullets.push(plural(a.agents, 'subagent') + ' started')
     }
+    const timeline = (d.timeline || []).slice(-TIMELINE_SHOWN)
     bullets.forEach((b, i) => out.push(el.Text({ key: 'b' + i, dimColor: b.startsWith('   '), children: [b.startsWith('   ') ? b : '• ' + b] })))
+    if (timeline.length) {
+      out.push(spacer(el, 's3'))
+      out.push(heading(el, 'tl-title', 'Timeline'))
+      timeline.forEach((t, i) => out.push(el.Text({ key: 'tl' + i, children: [clock(t.at) + '  ' + t.text] })))
+    }
     return out
   },
 }

@@ -67,3 +67,25 @@ export function shortModel(name) {
 export function basename(path) {
   return String(path || '').replace(/\/+$/, '').split('/').pop() || ''
 }
+
+// First meaningful line of a text with Markdown markers removed, at most `max` characters.
+export function firstLine(text, max = 90) {
+  let inFence = false
+  for (const raw of String(text || '').split('\n')) {
+    if (/^\s*(```|~~~)/.test(raw)) { inFence = !inFence; continue }
+    if (inFence) continue
+    const line = raw
+      .replace(/^\s*(#{1,6}\s+|>+\s*|[-*+]\s+(\[[ xX]\]\s+)?|\d+[.)]\s+)/, '')
+      .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/[*_`~]+/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (line && !/^[-=_|:\s]+$/.test(line)) return line.length > max ? line.slice(0, max - 1) + '…' : line
+  }
+  return ''
+}
+
+export function clock(ms) {
+  const d = new Date(ms)
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
+}

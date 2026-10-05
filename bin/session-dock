@@ -194,6 +194,17 @@ function sparkline(values) {
   return values.map((v) => SPARK[Math.min(7, Math.max(0, Math.floor((v / 100) * 8)))]).join('');
 }
 
+const clock = (ms) => { const d = new Date(ms); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+
+// "plan 3/7, now: Running tests", from state.modules.plan
+function planLine(record) {
+  const items = record.state && record.state.modules && record.state.modules.plan && record.state.modules.plan.items;
+  if (!Array.isArray(items) || !items.length) return '';
+  const done = items.filter((i) => i.status === 'completed').length;
+  const now = items.find((i) => i.status === 'in_progress');
+  return `plan ${done}/${items.length}${now ? ', now: ' + now.activeForm : done === items.length ? ', all done' : ''}`;
+}
+
 function stateOverview(record, width) {
   if (!record) return [`${S.grey}no session found for this directory: start Claude Code here with the session-dock plugin${S.reset}`, ''];
   const { session: se = {}, usage: u = {}, git: g = {} } = record.view;
@@ -214,6 +225,8 @@ function stateOverview(record, width) {
   const spark = sparkline(ov.history);
   if (spark) out.push(`${S.grey}trend  ${S.reset} ${S.cyan}${spark}${S.reset}`);
   if (u.costUsd !== undefined) out.push(`${S.grey}cost${S.reset}    $${u.costUsd.toFixed(2)}`);
+  const plan = planLine(record);
+  if (plan) out.push(`${S.cyan}☰ ${plan}${S.reset}`);
   out.push('', `${S.bold}${S.purple}Since you were away${S.reset} ${S.grey}(session-dock reset)${S.reset}`);
   const files = d.files || [];
   const bullets = [`${d.turns || 0} turns, ${Math.round((d.workMs || 0) / 60000)} min of work`];
@@ -221,7 +234,12 @@ function stateOverview(record, width) {
   if (files.length) bullets.push(`${files.length} files edited: ${files.slice(-4).join(', ')}`);
   if (d.tests) bullets.push(`tests run ${d.tests}x`);
   if (d.agents) bullets.push(`${d.agents} subagents`);
+  const tl = (ov.timeline || []).slice(-5);
   for (const b of bullets) out.push(...wrap(b.startsWith('  ') ? b : `${S.purple}•${S.reset} ${b}`, width, '  '));
+  if (tl.length) {
+    out.push('', `${S.bold}${S.purple}Timeline${S.reset}`);
+    for (const t of tl) out.push(...wrap(`${S.grey}${clock(t.at)}${S.reset}  ${t.text}`, width, '       '));
+  }
   out.push('');
   return out;
 }

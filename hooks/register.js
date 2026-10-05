@@ -15,9 +15,14 @@ let root = ''
 let digest = freshDigest(0, '')
 let view = { session: {}, usage: {}, git: {}, card: '', cardPath: '', commits: [], updated: '' }
 let lastSaved = 0
+let busy = false
+const SPARK = '▁▂▃▄▅▆▇█'
+const HISTORY_MAX = 40
+const WARN = 65
+const ALARM = 85
 
 function freshDigest(since, head) {
-  return { since, head, turns: 0, workMs: 0, files: {}, commands: 0, tests: 0, agents: 0, notes: [] }
+  return { since, head, turns: 0, workMs: 0, files: {}, commands: 0, tests: 0, agents: 0, notes: [], history: [] }
 }
 
 function clip(text) {
@@ -32,6 +37,26 @@ function bar(percent, width = 20) {
   const p = Math.max(0, Math.min(100, Math.round(percent ?? 0)))
   const filled = Math.round((p / 100) * width)
   return '█'.repeat(filled) + '░'.repeat(width - filled) + ' ' + p + '%'
+}
+
+function level(percent) {
+  return percent >= ALARM ? 'red' : percent >= WARN ? 'yellow' : 'green'
+}
+
+function sparkline(values) {
+  if (values.length < 2) return ''
+  return values.map((v) => SPARK[Math.min(7, Math.max(0, Math.floor((v / 100) * 8)))]).join('')
+}
+
+function limitLabel(kind) {
+  return { five_hour: '5h', seven_day: '7d' }[kind] || String(kind).slice(0, 7)
+}
+
+function sample() {
+  const p = view.usage.contextPercent
+  if (typeof p !== 'number') return
+  digest.history.push(Math.round(p))
+  if (digest.history.length > HISTORY_MAX) digest.history = digest.history.slice(-HISTORY_MAX)
 }
 
 function ago(ms) {
@@ -90,7 +115,7 @@ async function load($) {
   view = {
     session: {
       id, name: await sessionName($, id), model: await $.session.model(), cwd: root,
-      startedAt: usage.startedAt, turns: await $.session.turns(),
+      startedAt: usage.startedAt, turns: await $.session.turns(), busy,
     },
     usage: {
       contextPercent: usage.context.percent, contextTokens: usage.context.tokens, contextWindow: usage.context.window,
@@ -149,19 +174,13 @@ function track(e) {
 }
 
 function overviewMarkdown() {
-  const { session: s, usage: u, git: g } = view
+  const { session: s, git: g } = view
   const lines = []
-  lines.push('**' + (s.name || 'session') + '** · `' + (s.model || '?') + '`')
+  lines.push('`' + (s.model || '?') + '`')
   if (g.branch !== undefined && g.branch !== null) {
     const sync = g.ahead || g.behind ? ' (↑' + (g.ahead || 0) + ' ↓' + (g.behind || 0) + ')' : ''
     lines.push('branch `' + (g.branch || 'detached') + '`' + sync + ' · ' + (g.dirty ? g.dirty + ' uncommitted' : 'clean'))
   }
-  lines.push('')
-  lines.push('```')
-  lines.push('context ' + bar(u.contextPercent))
-  for (const limit of u.rateLimits || []) lines.push(({ five_hour: '5h', seven_day: '7d' }[limit.kind] || String(limit.kind).slice(0, 7)).padEnd(8) + bar(limit.percentUsed))
-  if (u.costUsd !== undefined) lines.push('cost    $' + u.costUsd.toFixed(2))
-  lines.push('```')
   return lines.join('\n')
 }
 
@@ -217,12 +236,19 @@ export function register(on, userOptions) {
     return result
   })
 
+  on('turn.start', async ($, e, next) => {
+    if (!e.agentId) { busy = true; if (await isOpen($)) { view.session.busy = true; $.ui.invalidate('ui.render') } }
+    return next(e)
+  })
+
   on('turn.complete', async ($, e, next) => {
     try {
       if (!e.agentId) {
+        busy = false
         digest.turns++
         digest.workMs += e.durationMs || 0
         await load($) // commits and usage are fresh at the end of each turn
+        sample()
         await persist($, true)
         if (await isOpen($)) $.ui.invalidate('ui.render')
       }
@@ -254,8 +280,38 @@ export function register(on, userOptions) {
 
     let body
     if (tab === 'overview') {
+      const u = view.usage
+      const meter = (key, label, percent) => {
+        const p = Math.max(0, Math.min(100, Math.round(percent ?? 0)))
+        const filled = Math.round((p / 100) * 20)
+        return Box({
+          key, flexDirection: 'row', columnGap: 1,
+          children: [
+            Text({ dimColor: true, children: [label.padEnd(8)] }),
+            Text({ color: level(p), children: ['█'.repeat(filled)] }),
+            Text({ dimColor: true, children: ['░'.repeat(20 - filled)] }),
+            Text({ children: [String(p).padStart(3) + '%'] }),
+          ],
+        })
+      }
+      const hot = [['context', u.contextPercent], ...(u.rateLimits || []).map((r) => [limitLabel(r.kind), r.percentUsed])]
+        .filter(([, p]) => p >= ALARM)
+      const spark = sparkline(digest.history)
+      const dot = view.session.busy ? { color: 'yellow', text: '● working' } : { color: 'green', text: '● idle' }
       body = [
+        Box({
+          key: 'head', flexDirection: 'row', columnGap: 2,
+          children: [Text({ color: dot.color, children: [dot.text] }), Text({ bold: true, children: [view.session.name || 'session'] })],
+        }),
         Markdown({ key: 'overview', text: overviewMarkdown() }),
+        ...(hot.length
+          ? [Text({ key: 'alarm', color: 'red', bold: true, inverse: true, children: [' ⚠ ' + hot.map(([l, p]) => l + ' ' + Math.round(p) + '%').join(' · ') + (hot[0][0] === 'context' ? ' — consider /compact ' : ' ')] })]
+          : []),
+        Text({ children: [' '] }),
+        meter('m-context', 'context', u.contextPercent),
+        ...(u.rateLimits || []).map((r) => meter('m-' + r.kind, limitLabel(r.kind), r.percentUsed)),
+        ...(spark ? [Box({ key: 'spark', flexDirection: 'row', columnGap: 1, children: [Text({ dimColor: true, children: ['trend   '] }), Text({ color: 'cyan', children: [spark] })] })] : []),
+        ...(u.costUsd !== undefined ? [Text({ dimColor: true, children: ['cost     $' + u.costUsd.toFixed(2)] })] : []),
         Text({ children: [' '] }),
         Box({
           flexDirection: 'row', columnGap: 2,

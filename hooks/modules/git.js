@@ -2,7 +2,7 @@
 // The overview and digest keep using the session root's repository (ctx.view.git).
 import { ago, basename, plural, spacer } from '../lib/util.js'
 
-const MAX_REPOS = 60
+const MAX_REPOS = 150
 const DISCOVER_TTL_MS = 3 * 60 * 1000
 const GRAPH_ROWS = 60
 const MAX_FILES = 40

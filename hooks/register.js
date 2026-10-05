@@ -140,7 +140,11 @@ function io($) {
     invalidate: () => $.ui.invalidate('ui.render'),
     refresh: () => refresh($),
     // Ask for a pane size (columns when docked, rows when inline); {} goes back to the default.
-    resize: (size) => $.ui.open({ id: PANE, title: 'Dock', focus: true, closeOnEscape: true, ...size }),
+    // Opening an open pane only retitles it, so the pane is closed and opened again.
+    resize: async (size) => {
+      await $.ui.close({ id: PANE })
+      return $.ui.open({ id: PANE, title: 'Dock', focus: true, closeOnEscape: true, ...size })
+    },
   }
 }
 

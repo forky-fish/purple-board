@@ -1,8 +1,8 @@
 // File tab: renders a Markdown file. Built in as "card" (.claude/dock.md); config can add more.
-import { clip } from '../lib/util.js'
+import { clip, isAbs } from '../lib/util.js'
 
 export function fileModule({ id, title, file }) {
-  const path = (ctx) => (file.startsWith('/') ? file : ctx.root + '/' + file)
+  const path = (ctx) => (isAbs(file) ? file : ctx.root + '/' + file)
   return {
     id,
     title,

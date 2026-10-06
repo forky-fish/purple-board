@@ -1,7 +1,7 @@
 // Overview: who and where this session is, how full its context and limits are,
 // and the "since you were away" digest with its reset button.
 import { planSummary } from './plan.js'
-import { ALARM, ago, clock, firstLine, heading, limitLabel, meter, plural, sparkline, spacer } from '../lib/util.js'
+import { ALARM, ago, clock, firstLine, heading, limitLabel, meter, norm, plural, sparkline, spacer } from '../lib/util.js'
 
 const HISTORY_MAX = 40
 const MAX_FILES = 200
@@ -36,7 +36,7 @@ export default {
       const e = ev.e
       const a = d.away
       if (['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(e.tool)) {
-        const file = String(e.file_path || e.notebook_path || '').replace(ctx.root + '/', '')
+        const file = norm(e.file_path || e.notebook_path || '').replace(ctx.root + '/', '')
         if (file && !a.files.includes(file) && a.files.length < MAX_FILES) a.files.push(file)
       } else if (e.tool === 'Bash') {
         const command = String(e.command || '')

@@ -1,5 +1,8 @@
-// Ports: TCP ports your own processes listen on (from `ss`), with the ones started inside
-// this project marked. Loads only while the tab is shown.
+// Ports: TCP ports your own processes listen on (from `ss`; on Windows `netstat` + `tasklist`),
+// with the ones started inside this project marked (Linux only: Windows has no cheap way to ask
+// a process for its working directory). Loads only while the tab is shown.
+import { isWindowsPath } from '../lib/util.js'
+
 const MAX_ROWS = 40
 
 // "LISTEN 0 4096 127.0.0.1:7777 0.0.0.0:* users:(("node",pid=1234,fd=20))" -> rows
@@ -20,6 +23,46 @@ export function parseSs(text) {
   return rows
 }
 
+// "  TCP    127.0.0.1:7777    0.0.0.0:0    LISTENING    1234" -> rows (names filled in later)
+export function parseNetstat(text) {
+  const seen = new Set()
+  const rows = []
+  for (const line of String(text).split(/\r?\n/)) {
+    const f = line.trim().split(/\s+/)
+    // The state word is localized (German: ABHÖREN); a listener is the row whose remote end is port 0.
+    if (f.length < 5 || f[0] !== 'TCP' || !/:0$/.test(f[2])) continue
+    const port = Number(f[1].slice(f[1].lastIndexOf(':') + 1))
+    const pid = Number(f[4])
+    if (!port || !pid || seen.has(port + ':' + pid)) continue
+    seen.add(port + ':' + pid)
+    rows.push({ port, name: '?', pid, local: /^(127\.|\[::1\])/.test(f[1]) })
+  }
+  return rows
+}
+
+// '"node.exe","1234","Console","1","50,000 K"' -> Map pid -> "node"
+export function parseTasklist(text) {
+  const names = new Map()
+  for (const line of String(text).split(/\r?\n/)) {
+    const m = line.match(/^"([^"]*)","(\d+)"/)
+    if (m) names.set(Number(m[2]), m[1].replace(/\.exe$/i, ''))
+  }
+  return names
+}
+
+async function loadWindows(ctx, d) {
+  let r
+  try { r = await ctx.run(['netstat', '-ano', '-p', 'TCP'], 10000) } catch { r = null }
+  if (!r || r.exitCode > 0) { d.error = 'netstat is not available.'; d.rows = []; return }
+  const rows = parseNetstat(r.stdout).slice(0, MAX_ROWS)
+  try {
+    const t = await ctx.run(['tasklist', '/FO', 'CSV', '/NH'], 10000)
+    const names = parseTasklist(t.stdout)
+    for (const row of rows) row.name = names.get(row.pid) || '?'
+  } catch { /* ports without names */ }
+  d.rows = rows.sort((a, b) => a.port - b.port)
+}
+
 export default {
   id: 'ports',
   title: 'Ports',
@@ -31,6 +74,7 @@ export default {
   async load(ctx) {
     const d = ctx.live('ports')
     d.error = ''
+    if (isWindowsPath(ctx.root)) return loadWindows(ctx, d)
     let r
     try { r = await ctx.run(['ss', '-ltnpH'], 5000) } catch { r = null }
     if (!r || r.exitCode > 0 || (!r.stdout && r.stderr)) { d.error = 'ss is not available (package iproute2).'; d.rows = []; return }

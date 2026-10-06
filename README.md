@@ -42,7 +42,8 @@ you were away.
 
 - Claude Code with the plugin pane API (developed and tested with **2.1.289**; older
   versions may not load the plugin).
-- Linux or macOS. The Ports tab needs `ss` (Linux, package `iproute2`).
+- Linux, macOS or Windows. The Ports tab needs `ss` on Linux (package `iproute2`) and uses
+  `netstat` and `tasklist` on Windows. The tmux view is not available on Windows.
 - Node.js 18+ only for the optional tmux and browser views.
 
 ## Install
@@ -66,7 +67,7 @@ claude --plugin-dir ~/.local/share/session-dock      # try it in one session
 ```
 
 To load it in every session without the marketplace, add the directory to
-`CLAUDE_CODE_PLUGIN_DIRS` (colon-separated) in the `env` block of `~/.claude/settings.json`.
+`CLAUDE_CODE_PLUGIN_DIRS` (colon-separated; semicolon-separated on Windows) in the `env` block of `~/.claude/settings.json`.
 Claude Code reads that variable only when a session starts.
 
 Update with `git pull` in the clone, then `/reload-plugins`.

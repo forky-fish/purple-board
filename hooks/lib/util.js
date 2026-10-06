@@ -64,8 +64,22 @@ export function shortModel(name) {
   return m[1].toLowerCase() + (m[2] ? ' ' + m[2] + (m[3] ? '.' + m[3] : '') : '')
 }
 
+// Windows: backslashes become slashes and the drive letter is upper case, so every path the
+// dock handles can be joined and compared with '/'. POSIX paths pass through unchanged.
+export function norm(path) {
+  return String(path || '').replaceAll('\\', '/').replace(/^([a-z]):/, (m, d) => d.toUpperCase() + ':')
+}
+
+export function isAbs(path) {
+  return /^(\/|[A-Za-z]:\/)/.test(norm(path))
+}
+
+export function isWindowsPath(path) {
+  return /^[A-Za-z]:\//.test(norm(path))
+}
+
 export function basename(path) {
-  return String(path || '').replace(/\/+$/, '').split('/').pop() || ''
+  return norm(path).replace(/\/+$/, '').split('/').pop() || ''
 }
 
 // First meaningful line of a text with Markdown markers removed, at most `max` characters.

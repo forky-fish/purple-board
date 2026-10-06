@@ -17,6 +17,7 @@ import notes from './modules/notes.js'
 import artifacts from './modules/artifacts.js'
 import { fileModule } from './modules/file.js'
 import { commandModule } from './modules/command.js'
+import { norm } from './lib/util.js'
 
 const PANE = 'session-dock'
 const COMMAND = 'sdock'
@@ -78,10 +79,15 @@ function buildTabs(globalConfig, projectConfig) {
   return tabs.length ? tabs : DEFAULT_TABS.map((id) => BUILTIN[id])
 }
 
+// POSIX has HOME, Windows USERPROFILE; either way the result uses forward slashes.
+async function homeDir($) {
+  return norm((await $.env.get('HOME')) || (await $.env.get('USERPROFILE')) || '')
+}
+
 async function init($) {
-  const home = await $.env.get('HOME')
+  const home = await homeDir($)
   const dir = home + '/.claude/session-dock'
-  const root = await $.session.root()
+  const root = norm(await $.session.root())
   const sessionId = await $.session.id()
   const saved = await readJson($, dir + '/sessions/' + sessionId + '.json')
   const state = saved?.v === 2 && saved.state ? saved.state : { since: Date.now(), head: '', modules: {} }
@@ -171,7 +177,7 @@ async function loadView($) {
   }
   const [behind, ahead] = upstream ? upstream.split(/\s+/).map(Number) : [undefined, undefined]
   const previous = ctx.view.session
-  const info = await readJson($, (await $.env.get('HOME')) + '/.claude/sessions/' + (await sessionFile($)))
+  const info = await readJson($, (await homeDir($)) + '/.claude/sessions/' + (await sessionFile($)))
   ctx.view = {
     session: {
       id: ctx.sessionId, name: info?.name ?? previous.name, model: await $.session.model(), cwd: root,
@@ -191,7 +197,7 @@ let ownSessionFile = null
 async function sessionFile($) {
   if (ownSessionFile) return ownSessionFile
   try {
-    const home = await $.env.get('HOME')
+    const home = await homeDir($)
     for (const entry of await $.fs.list(home + '/.claude/sessions')) {
       const name = String(entry.name)
       if (!name.endsWith('.json')) continue

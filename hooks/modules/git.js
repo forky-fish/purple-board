@@ -1,8 +1,9 @@
 // Git: pick a repository at or below the session root and look at it as status, graph or branches.
 // The overview and digest keep using the session root's repository (ctx.view.git).
-import { ago, basename, plural, spacer } from '../lib/util.js'
+import { ago, basename, isAbs, norm, plural, spacer } from '../lib/util.js'
 
 const MAX_REPOS = 150
+const MAX_DIRS = 3000 // directories listed while looking for repositories
 const PICK_PAGE = 15
 const DISCOVER_TTL_MS = 3 * 60 * 1000
 const GRAPH_ROWS = 60
@@ -39,7 +40,8 @@ async function readBranch(ctx, repo) {
     if (repo.worktree) {
       const m = (await ctx.readFile(gitDir)).match(/^gitdir: (.+)$/m)
       if (!m) return null
-      gitDir = m[1].startsWith('/') ? m[1].trim() : repo.path + '/' + m[1].trim()
+      const target = norm(m[1].trim())
+      gitDir = isAbs(target) ? target : repo.path + '/' + target
     }
     const head = (await ctx.readFile(gitDir + '/HEAD')).trim()
     const m = head.match(/^ref: refs\/heads\/(.+)$/)
@@ -54,13 +56,21 @@ async function discover(ctx) {
   const found = new Map() // path -> { path, worktree, mtime }
   const top = await git(ctx, ctx.root, ['rev-parse', '--show-toplevel'])
   if (top) found.set(top, { path: top, worktree: false, mtime: Infinity })
-  try {
-    const r = await ctx.run(['find', ctx.root, '-maxdepth', '3', '-name', 'node_modules', '-prune', '-o', '-name', '.git', '-printf', '%y %T@ %p\n'], 10000)
-    for (const line of r.stdout.split('\n')) {
-      const m = line.match(/^([df]) ([\d.]+) (.+)\/\.git$/)
-      if (m && !found.has(m[3])) found.set(m[3], { path: m[3], worktree: m[1] === 'f', mtime: Number(m[2]) })
+  // Walk down three levels ourselves (no GNU find on Windows); a .git directory is a repository,
+  // a .git file a worktree. node_modules and .git itself are not entered.
+  const queue = [{ dir: ctx.root, depth: 0 }]
+  for (let visited = 0; queue.length && visited < MAX_DIRS; visited++) {
+    const { dir, depth } = queue.shift()
+    let entries
+    try { entries = await ctx.list(dir) } catch { continue }
+    for (const entry of entries) {
+      if (entry.name === '.git') {
+        if (!found.has(dir)) found.set(dir, { path: dir, worktree: entry.kind === 'file', mtime: (entry.mtimeMs || 0) / 1000 })
+      } else if (entry.kind === 'dir' && entry.name !== 'node_modules' && depth < 3) {
+        queue.push({ dir: dir + '/' + entry.name, depth: depth + 1 })
+      }
     }
-  } catch { /* keep what we have */ }
+  }
   let repos = [...found.values()].sort((a, b) => (a.path === top ? -1 : b.path === top ? 1 : a.path.localeCompare(b.path))).slice(0, MAX_REPOS)
   for (const repo of repos) {
     repo.branch = await readBranch(ctx, repo)
